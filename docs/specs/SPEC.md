@@ -44,9 +44,10 @@ ToolSearch indexes tool definitions from connected MCP servers, generates semant
 
 ## 1.3 In Scope
 
-- Semantic indexing of MCP tool definitions (name, description, input schema).
+- **Unified Semantic Indexing**: indexing of MCP tool definitions, static prompts, and agent "skills" (modular instructions/capabilities).
 - **Direct OpenAPI/Swagger ingestion**: native discovery and indexing of REST endpoints without a separate MCP bridge.
-- Query-time retrieval of top-k relevant tools via embedding similarity.
+- **Skill Management**: specialized artifact type representing high-level instructions (similar to Claude Code skills) that can be served via the MCP `prompts` interface.
+- Query-time retrieval of top-k relevant tools, prompts, or skills via embedding similarity.
 - MCP Proxy Mode: stdio-to-stdio wrapper that filters `tools/list` responses and transparently passes all other MCP messages.
 - Search Tool Mode: a standalone MCP tool (`toolsearch_find`) for on-demand mid-session discovery.
 - Query context acquisition via companion tool (`toolsearch_context`), HTTP sidecar, or static filters.
@@ -63,7 +64,7 @@ ToolSearch indexes tool definitions from connected MCP servers, generates semant
 - Tool description enrichment, rewriting, or quality improvement.
 - User prompt rewriting or NLP preprocessing.
 - GUI or web dashboard.
-- MCP resource or prompt indexing (tools only).
+- MCP resource or prompt indexing (tools only in V1; now including prompts and skills).
 - LLM-in-the-loop re-ranking (embedding-only retrieval in V1).
 
 ---
@@ -78,8 +79,8 @@ ToolSearch is composed of six logical components organized in three layers: **In
 
 | Component | Responsibility |
 |-----------|---------------|
-| **Collector** | Reads the operator's MCP server or OpenAPI configuration. Enumerates all sources. For MCP: spawns process and calls `tools/list`. For OpenAPI: fetches the spec (JSON/YAML) and dynamically generates `ToolRecord` definitions for each operation. Handles pagination and spec resolution. |
-| **Forge Engine** | Internal component used by the Collector to "agentize" OpenAPI operations on-the-fly. It converts REST endpoints into MCP-compliant tool definitions (name, description, input schema) for indexing and proxy-time execution. |
+| **Collector** | Reads the operator's MCP server, OpenAPI configuration, or Skill directory. Enumerates all sources. For MCP: spawns process and calls `tools/list` and `prompts/list`. For OpenAPI: fetches the spec and generates tools. For Skills: scans a designated directory for `SKILL.md` files or specialized YAML definitions. |
+| **Forge Engine** | Internal component used by the Collector to "agentize" OpenAPI operations or Skill definitions on-the-fly. |
 | **Embedder** | Accepts a list of `ToolRecord` objects and produces a vector embedding for each. Delegates to a pluggable `EmbeddingBackend` interface. Ships with a default local backend (ONNX-based sentence transformer). Supports optional remote backends (e.g., OpenAI embeddings API) via configuration. |
 | **IndexWriter** | Persists `ToolRecord` objects and their embedding vectors into the local vector store. Supports full rebuild and incremental update (add/remove/replace individual tools). Maintains a metadata table mapping each tool to its source server for incremental updates. |
 
@@ -632,13 +633,15 @@ Created by `tool-search init` with defaults. Editable by the operator at any tim
 
 ## 6.2 Configuration Fields
 
-### `[servers.<server_id>]` — Tool Source Definitions
+### `[servers.<server_id>]` — Tool/Prompt Source Definitions
 
 | Key Path | Type | Default | Validation | Description |
 |----------|------|---------|------------|-------------|
-| `servers.<id>.type` | enum | `"mcp"` | `"mcp"`, `"openapi"` | The source type. Defaults to `"mcp"`. |
+| `servers.<id>.type` | enum | `"mcp"` | `"mcp"`, `"openapi"`, `"skill"` | The source type. Defaults to `"mcp"`. |
 | `servers.<id>.url` | string | `null` | Valid URL | Required if type is `"openapi"`. URL to the `swagger.json` or `openapi.yaml`. |
 | `servers.<id>.command` | string | `null` | — | Required if type is `"mcp"`. Command to spawn the MCP server. |
+| `servers.<id>.path` | string | `null` | Valid Path | Required if type is `"skill"`. Path to a directory containing skill definitions. |
+| `servers.<id>.args` | list[string] | `[]` | — | Arguments to the command (for `mcp` type). |
 | `servers.<id>.args` | list[string] | `[]` | — | Arguments to the command. When absent, no arguments are passed. |
 | `servers.<id>.env` | map[string, string] | `{}` | — | Extra environment variables. Merged with parent process env; these take precedence. When absent, no extra env vars. |
 | `servers.<id>.enabled` | boolean | `true` | — | Whether to include this server in indexing and proxy. When absent, the server is enabled. |
