@@ -1,0 +1,46 @@
+[project]
+name = "mcp_semantic_gateway"
+version = "0.1.0"
+description = "Semantic Tool Discovery Middleware for MCP"
+readme = "README.md"
+authors = [
+    { name = "Dallas Pool", email = "codeninja@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "aiosqlite>=0.22.1",
+    "fastapi>=0.135.1",
+    "hnswlib>=0.8.0",
+    "httpx>=0.28.1",
+    "onnxruntime>=1.24.3",
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.13.1",
+    "pyjwt>=2.11.0",
+    "pyyaml>=6.0.3",
+    "rich>=14.3.3",
+    "sentence-transformers>=5.2.3",
+    "sse-starlette>=3.3.2",
+    "tokenizers>=0.22.2",
+    "tomlkit>=0.14.0",
+    "tqdm>=4.67.3",
+    "typer>=0.12.0",
+    "uvicorn>=0.41.0",
+]
+
+[project.scripts]
+mcp-semantic-gateway = "mcp_semantic_gateway.cli.main:app"
+
+[build-system]
+requires = ["uv_build>=0.8.23,<0.9.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mkdocs>=1.6.1",
+    "mkdocs-material>=9.7.4",
+    "mkdocstrings[python]>=1.0.3",
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    "pytest-cov>=7.0.0",
+    "ruff>=0.15.5",
+]
