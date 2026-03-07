@@ -13,4 +13,10 @@ lint:
 format:
 	uv run ruff format .
 
-.PHONY: setup dev test lint format
+docs-serve:
+	uv run mkdocs serve
+
+docs-build:
+	uv run mkdocs build
+
+.PHONY: setup dev test lint format docs-serve docs-build
