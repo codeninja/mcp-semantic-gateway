@@ -12,6 +12,14 @@ MCP Semantic Gateway is an open-source, local-first middleware for the Model Con
 If you have 30+ MCP tools, your agent's context window is saturated with JSON definitions before it even starts thinking. This leads to **hallucinations**, **high token costs**, and **declining accuracy**. MCP Semantic Gateway sits as a proxy between your client (Claude Code, Cursor) and your servers, serving only the tools relevant to your current task.
 
 ### Installation
+
+**From PyPI (Recommended)**
+```bash
+pip install mcp-semantic-gateway
+mcp-semantic-gateway init
+```
+
+**From Source**
 ```bash
 # Clone the repository
 gh repo clone codeninja/mcp-semantic-gateway
@@ -38,14 +46,26 @@ url = "https://api.weather.gov/openapi.json"
 ### 2. Build the Semantic Index
 MCP Semantic Gateway embeds your tool descriptions locally using `all-MiniLM-L6-v2`.
 ```bash
-uv run mcp-semantic-gateway index
+mcp-semantic-gateway index
 ```
 
 ### 3. Connect Your Agent
-Point your client to the MCP Semantic Gateway Proxy. For Claude Desktop:
+Point your client to the MCP Semantic Gateway Proxy.
+
+**For PyPI Installation (Claude Desktop):**
 ```json
 "mcpServers": {
-  "mcp_semantic_gateway": {
+  "mcp-semantic-gateway": {
+    "command": "mcp-semantic-gateway",
+    "args": ["proxy"]
+  }
+}
+```
+
+**For Source Installation (Claude Desktop):**
+```json
+"mcpServers": {
+  "mcp-semantic-gateway": {
     "command": "uv",
     "args": ["--directory", "/path/to/mcp-semantic-gateway", "run", "mcp-semantic-gateway", "proxy"]
   }
