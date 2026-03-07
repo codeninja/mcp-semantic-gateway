@@ -14,12 +14,12 @@ If you have 30+ MCP tools, your agent's context window is saturated with JSON de
 ### Installation
 ```bash
 # Clone the repository
-gh repo clone codeninja/MCP Semantic Gateway
-cd MCP Semantic Gateway
+gh repo clone codeninja/mcp-semantic-gateway
+cd mcp-semantic-gateway
 
 # Install dependencies and initialize
 uv sync
-uv run MCP Semantic Gateway init
+uv run mcp-semantic-gateway init
 ```
 
 ### 1. Configure Your Sources
@@ -38,7 +38,7 @@ url = "https://api.weather.gov/openapi.json"
 ### 2. Build the Semantic Index
 MCP Semantic Gateway embeds your tool descriptions locally using `all-MiniLM-L6-v2`.
 ```bash
-uv run MCP Semantic Gateway index
+uv run mcp-semantic-gateway index
 ```
 
 ### 3. Connect Your Agent
@@ -47,7 +47,7 @@ Point your client to the MCP Semantic Gateway Proxy. For Claude Desktop:
 "mcpServers": {
   "mcp_semantic_gateway": {
     "command": "uv",
-    "args": ["--directory", "/path/to/MCP Semantic Gateway", "run", "MCP Semantic Gateway", "proxy"]
+    "args": ["--directory", "/path/to/mcp-semantic-gateway", "run", "mcp-semantic-gateway", "proxy"]
   }
 }
 ```
