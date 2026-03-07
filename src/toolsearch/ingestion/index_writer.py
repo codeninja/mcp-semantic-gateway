@@ -18,35 +18,32 @@ async def run_indexing():
     embedder = LocalEmbedder(config.embedding.model_name)
     vector_store = VectorStore(base_dir / "index" / "vectors.db", dim=config.embedding.dimensions)
     
+    from toolsearch.ingestion.collector import Collector
+    collector = Collector(config)
+    
+    typer.echo("Collecting tools from all sources...")
+    mcp_tools = await collector.collect_all()
+    
     all_tools = []
     all_texts = []
     
-    for server_id, server_config in config.servers.items():
-        if not server_config.enabled:
-            continue
-            
-        typer.echo(f"Collecting tools from {server_id}...")
-        client = MCPClient(server_id, server_config)
-        await client.start()
-        try:
-            mcp_tools = await client.call_tools_list()
-            for t in mcp_tools:
-                text = build_embedding_text(t["name"], t.get("title"), t.get("description"))
-                record = ToolRecord(
-                    tool_id=f"{server_id}::{t['name']}",
-                    server_id=server_id,
-                    name=t["name"],
-                    title=t.get("title"),
-                    description=t.get("description"),
-                    input_schema=t.get("inputSchema"),
-                    embedding_text=text,
-                    indexed_at=datetime.utcnow().isoformat(),
-                    index_version=1
-                )
-                all_tools.append(record)
-                all_texts.append(text)
-        finally:
-            await client.stop()
+    for t in mcp_tools:
+        server_id = t["_server_id"]
+        text = build_embedding_text(t["name"], t.get("title"), t.get("description"))
+        record = ToolRecord(
+            tool_id=f"{server_id}::{t['name']}",
+            server_id=server_id,
+            name=t["name"],
+            title=t.get("title"),
+            description=t.get("description"),
+            input_schema=t.get("inputSchema"),
+            annotations=t.get("annotations"),
+            embedding_text=text,
+            indexed_at=datetime.utcnow().isoformat(),
+            index_version=1
+        )
+        all_tools.append(record)
+        all_texts.append(text)
             
     if all_texts:
         typer.echo(f"Embedding {len(all_texts)} tools...")

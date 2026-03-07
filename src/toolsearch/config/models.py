@@ -16,9 +16,15 @@ class FallbackBehavior(str, Enum):
     NONE = "none"
     TAGGED = "tagged"
 
+class SourceType(str, Enum):
+    MCP = "mcp"
+    OPENAPI = "openapi"
+
 class ServerConfig(BaseModel):
-    command: str
+    type: SourceType = SourceType.MCP
+    command: Optional[str] = None
     args: List[str] = Field(default_factory=list)
+    url: Optional[str] = None  # For OpenAPI specs
     env: Dict[str, str] = Field(default_factory=dict)
     enabled: bool = True
     tags: List[str] = Field(default_factory=list)
