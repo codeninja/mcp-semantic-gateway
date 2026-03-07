@@ -45,6 +45,7 @@ ToolSearch indexes tool definitions from connected MCP servers, generates semant
 ## 1.3 In Scope
 
 - Semantic indexing of MCP tool definitions (name, description, input schema).
+- **Direct OpenAPI/Swagger ingestion**: native discovery and indexing of REST endpoints without a separate MCP bridge.
 - Query-time retrieval of top-k relevant tools via embedding similarity.
 - MCP Proxy Mode: stdio-to-stdio wrapper that filters `tools/list` responses and transparently passes all other MCP messages.
 - Search Tool Mode: a standalone MCP tool (`toolsearch_find`) for on-demand mid-session discovery.
@@ -58,7 +59,7 @@ ToolSearch indexes tool definitions from connected MCP servers, generates semant
 
 - Tool execution (`tools/call` passthrough only — ToolSearch never interprets or modifies tool invocation).
 - MCP server implementation, lifecycle management, or health checking.
-- Cloud/hosted deployment, multi-tenant operation, or remote API service.
+- [ ] Cloud/hosted deployment, multi-tenant operation, or remote API service.
 - Tool description enrichment, rewriting, or quality improvement.
 - User prompt rewriting or NLP preprocessing.
 - GUI or web dashboard.
@@ -77,7 +78,8 @@ ToolSearch is composed of six logical components organized in three layers: **In
 
 | Component | Responsibility |
 |-----------|---------------|
-| **Collector** | Reads the operator's MCP server configuration (e.g., `claude_desktop_config.json`, `mcp-config.json`, or ToolSearch's own config). Enumerates all configured MCP servers. For each server, spawns the server process via its configured command/args and calls `tools/list` to harvest tool definitions. Handles pagination (`nextCursor`). |
+| **Collector** | Reads the operator's MCP server or OpenAPI configuration. Enumerates all sources. For MCP: spawns process and calls `tools/list`. For OpenAPI: fetches the spec (JSON/YAML) and dynamically generates `ToolRecord` definitions for each operation. Handles pagination and spec resolution. |
+| **Forge Engine** | Internal component used by the Collector to "agentize" OpenAPI operations on-the-fly. It converts REST endpoints into MCP-compliant tool definitions (name, description, input schema) for indexing and proxy-time execution. |
 | **Embedder** | Accepts a list of `ToolRecord` objects and produces a vector embedding for each. Delegates to a pluggable `EmbeddingBackend` interface. Ships with a default local backend (ONNX-based sentence transformer). Supports optional remote backends (e.g., OpenAI embeddings API) via configuration. |
 | **IndexWriter** | Persists `ToolRecord` objects and their embedding vectors into the local vector store. Supports full rebuild and incremental update (add/remove/replace individual tools). Maintains a metadata table mapping each tool to its source server for incremental updates. |
 
@@ -94,7 +96,8 @@ ToolSearch is composed of six logical components organized in three layers: **In
 |-----------|---------------|
 | **MCP Proxy** | A stdio-to-stdio MCP server wrapper. Spawns the upstream MCP server as a child process. Intercepts and transforms `tools/list` responses using the QueryEngine. Transparently passes all other MCP messages (`tools/call`, `notifications/*`, `resources/*`, `prompts/*`, etc.) bidirectionally without modification. Manages query context state set by the companion `toolsearch_context` tool. |
 | **Search Tool Server** | A standalone MCP server that exposes two tools: `toolsearch_find` (semantic search returning full tool definitions) and `toolsearch_context` (sets the query context for a subsequent proxy-mode `tools/list` call). Can run alongside the proxy or independently. |
-| **CLI** | User-facing command-line interface. Subcommands: `init`, `index`, `proxy`, `search`, `bootstrap`, `config`, `status`. Orchestrates the other components. |
+| **HTTP Server (SSE)** | A public-facing FastAPI server that implements the MCP-over-HTTP (SSE) transport. Supports multi-tenant query context via session headers. |
+| **CLI** | User-facing command-line interface. Subcommands: `init`, `index`, `proxy`, `serve`, `search`, `bootstrap`, `config`, `status`. Orchestrates the other components. |
 | **Bootstrap Engine** | Generates client-specific configuration snippets for supported agent runtimes. Each bootstrap target is a template that maps ToolSearch's proxy or search tool into the client's native configuration format. |
 
 ## 2.2 Layered Architecture Diagram
@@ -629,11 +632,13 @@ Created by `tool-search init` with defaults. Editable by the operator at any tim
 
 ## 6.2 Configuration Fields
 
-### `[servers.<server_id>]` — MCP Server Definitions
+### `[servers.<server_id>]` — Tool Source Definitions
 
 | Key Path | Type | Default | Validation | Description |
 |----------|------|---------|------------|-------------|
-| `servers.<id>.command` | string | — (required) | Non-empty. Executable must exist on PATH or be an absolute path. | Command to spawn the MCP server. |
+| `servers.<id>.type` | enum | `"mcp"` | `"mcp"`, `"openapi"` | The source type. Defaults to `"mcp"`. |
+| `servers.<id>.url` | string | `null` | Valid URL | Required if type is `"openapi"`. URL to the `swagger.json` or `openapi.yaml`. |
+| `servers.<id>.command` | string | `null` | — | Required if type is `"mcp"`. Command to spawn the MCP server. |
 | `servers.<id>.args` | list[string] | `[]` | — | Arguments to the command. When absent, no arguments are passed. |
 | `servers.<id>.env` | map[string, string] | `{}` | — | Extra environment variables. Merged with parent process env; these take precedence. When absent, no extra env vars. |
 | `servers.<id>.enabled` | boolean | `true` | — | Whether to include this server in indexing and proxy. When absent, the server is enabled. |
