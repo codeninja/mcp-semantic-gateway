@@ -32,6 +32,12 @@ def index():
     asyncio.run(run_indexing())
 
 @app.command()
+def server():
+    """Start the ToolSearch HTTP/SSE server."""
+    from toolsearch.integration.server import start_server
+    start_server()
+
+@app.command()
 def proxy():
     """Start the MCP proxy wrapper."""
     from toolsearch.integration.proxy import ToolSearchProxy

@@ -59,6 +59,12 @@ class LoggingConfig(BaseModel):
     max_file_size_mb: int = Field(default=100, ge=1, le=10000)
     max_files: int = Field(default=5, ge=1, le=100)
 
+class ServerHttpConfig(BaseModel):
+    host: str = "0.0.0.0"
+    port: int = Field(default=8000, ge=1, le=65535)
+    api_key: Optional[str] = None
+    cors_origins: List[str] = Field(default_factory=lambda: ["*"])
+
 class ToolSearchConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="TOOLSEARCH_",
@@ -72,6 +78,7 @@ class ToolSearchConfig(BaseSettings):
     proxy: ProxyConfig = Field(default_factory=ProxyConfig)
     index: IndexConfig = Field(default_factory=IndexConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    http: ServerHttpConfig = Field(default_factory=ServerHttpConfig)
 
     @validator("embedding")
     def validate_embedding(cls, v):
