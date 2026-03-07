@@ -1,4 +1,4 @@
-# MCP Semantic Gateway: Semantic Discovery Middleware for MCP 🦞
+# MCP Semantic Gateway: Semantic Discovery Middleware for MCP 
 
 **Stop Bloating Your Agent's Context. Start Scaling Your Toolsets.**
 
