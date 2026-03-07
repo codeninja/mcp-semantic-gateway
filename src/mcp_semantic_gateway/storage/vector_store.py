@@ -24,5 +24,12 @@ class VectorStore:
             self.index.load_index(str(self.index_path))
 
     def knn_query(self, query_vector: List[float], k: int = 10) -> Tuple[List[int], List[float]]:
+        # Handle uninitialized index
+        try:
+            if self.index.element_count == 0:
+                return [], []
+        except Exception:
+            return [], []
+            
         labels, distances = self.index.knn_query(np.array(query_vector), k=k)
         return labels[0].tolist(), distances[0].tolist()

@@ -2,11 +2,11 @@ import os
 import tomllib
 from typing import Optional
 from pathlib import Path
-from mcp_semantic_gateway.config.models import MCP Semantic GatewayConfig
+from mcp_semantic_gateway.config.models import MCPSemanticGatewayConfig
 
 DEFAULT_CONFIG_PATH = Path("~/.mcp_semantic_gateway/config.toml").expanduser()
 
-def load_config(config_path: Optional[Path] = None) -> MCP Semantic GatewayConfig:
+def load_config(config_path: Optional[Path] = None) -> MCPSemanticGatewayConfig:
     path = config_path or DEFAULT_CONFIG_PATH
     
     config_dict = {}
@@ -15,4 +15,4 @@ def load_config(config_path: Optional[Path] = None) -> MCP Semantic GatewayConfi
             config_dict = tomllib.load(f)
             
     # BaseSettings handles env var overrides automatically
-    return MCP Semantic GatewayConfig(**config_dict)
+    return MCPSemanticGatewayConfig(**config_dict)

@@ -3,12 +3,12 @@ from pathlib import Path
 import time
 import json
 import aiosqlite
-from mcp_semantic_gateway.config.models import MCP Semantic GatewayConfig, FallbackBehavior
+from mcp_semantic_gateway.config.models import MCPSemanticGatewayConfig, FallbackBehavior
 from mcp_semantic_gateway.storage.vector_store import VectorStore
 from mcp_semantic_gateway.ingestion.embedder import LocalEmbedder
 
 class SearchCore:
-    def __init__(self, config: MCP Semantic GatewayConfig, base_dir: Path):
+    def __init__(self, config: MCPSemanticGatewayConfig, base_dir: Path):
         self.config = config
         self.base_dir = base_dir
         self.embedder = LocalEmbedder(config.embedding.model_name)

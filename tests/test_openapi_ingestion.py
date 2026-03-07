@@ -7,7 +7,7 @@ import uvicorn
 import threading
 import time
 from mcp_semantic_gateway.ingestion.collector import Collector
-from mcp_semantic_gateway.config.models import MCP Semantic GatewayConfig, ServerConfig, SourceType
+from mcp_semantic_gateway.config.models import MCPSemanticGatewayConfig, ServerConfig, SourceType
 
 # 1. Mock OpenAPI Server
 mock_app = FastAPI()
@@ -57,7 +57,7 @@ def openapi_server():
 
 @pytest.mark.asyncio
 async def test_openapi_ingestion(openapi_server):
-    config = MCP Semantic GatewayConfig(
+    config = MCPSemanticGatewayConfig(
         servers={
             "test-api": ServerConfig(
                 type=SourceType.OPENAPI,

@@ -73,7 +73,7 @@ class ServerHttpConfig(BaseModel):
     api_key: Optional[str] = None
     cors_origins: List[str] = Field(default_factory=lambda: ["*"])
 
-class MCP Semantic GatewayConfig(BaseSettings):
+class MCPSemanticGatewayConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="TOOLSEARCH_",
         env_nested_delimiter="__",

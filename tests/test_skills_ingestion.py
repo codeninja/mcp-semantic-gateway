@@ -2,7 +2,7 @@ import pytest
 import os
 from pathlib import Path
 from mcp_semantic_gateway.ingestion.collector import Collector
-from mcp_semantic_gateway.config.models import MCP Semantic GatewayConfig, ServerConfig, SourceType
+from mcp_semantic_gateway.config.models import MCPSemanticGatewayConfig, ServerConfig, SourceType
 
 @pytest.fixture
 def skills_dir(tmp_path):
@@ -18,7 +18,7 @@ def skills_dir(tmp_path):
 
 @pytest.mark.asyncio
 async def test_skills_ingestion(skills_dir):
-    config = MCP Semantic GatewayConfig(
+    config = MCPSemanticGatewayConfig(
         servers={
             "my-skills": ServerConfig(
                 type=SourceType.SKILL,

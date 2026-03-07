@@ -7,7 +7,7 @@ import sys
 import json
 import os
 
-class MCP Semantic GatewayProxy:
+class MCPSemanticGatewayProxy:
     def __init__(self):
         self.config = load_config()
         self.base_dir = initialize_data_dir()
@@ -90,6 +90,6 @@ class MCP Semantic GatewayProxy:
                         client.process.stdin.write(line)
                         await client.process.stdin.drain()
             elif method == "initialize":
-                resp = {"jsonrpc": "2.0", "id": req["id"], "result": {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "MCP Semantic GatewayProxy", "version": "1.0.0"}}}
+                resp = {"jsonrpc": "2.0", "id": req["id"], "result": {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "MCPSemanticGatewayProxy", "version": "1.0.0"}}}
                 sys.stdout.write(json.dumps(resp) + "\n")
                 sys.stdout.flush()

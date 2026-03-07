@@ -9,7 +9,7 @@ from typing import Optional, Dict, List
 import asyncio
 import json
 
-app = FastAPI(title="MCP Semantic Gateway HTTP Server")
+app = FastAPI(title="MCPSemanticGateway HTTP Server")
 config = load_config()
 base_dir = initialize_data_dir()
 core = SearchCore(config, base_dir)

@@ -6,7 +6,7 @@ import httpx
 import yaml
 from pathlib import Path
 from typing import Dict, List, Optional, Any
-from mcp_semantic_gateway.config.models import SourceType, MCP Semantic GatewayConfig, ServerConfig
+from mcp_semantic_gateway.config.models import SourceType, MCPSemanticGatewayConfig, ServerConfig
 from mcp_semantic_gateway.ingestion.forge import ForgeEngine
 
 class MCPClient:
@@ -47,7 +47,7 @@ class MCPClient:
             "params": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "MCP Semantic Gateway", "version": "1.0.0"}
+                "clientInfo": {"name": "MCPSemanticGateway", "version": "1.0.0"}
             }
         }
         self.process.stdin.write((json.dumps(init_req) + "\n").encode())
@@ -106,7 +106,7 @@ class MCPClient:
         return prompts
 
 class Collector:
-    def __init__(self, config: MCP Semantic GatewayConfig):
+    def __init__(self, config: MCPSemanticGatewayConfig):
         self.config = config
 
     async def collect_all(self) -> List[dict]:

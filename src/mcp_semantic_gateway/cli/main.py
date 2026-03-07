@@ -19,10 +19,10 @@ def main(
 
 @app.command()
 def init():
-    """Initialize MCP Semantic Gateway data directory and configuration."""
+    """Initialize MCPSemanticGateway data directory and configuration."""
     from mcp_semantic_gateway.storage.init import initialize_data_dir
     initialize_data_dir()
-    typer.echo("Initialized MCP Semantic Gateway at ~/.mcp_semantic_gateway")
+    typer.echo("Initialized MCPSemanticGateway at ~/.mcp_semantic_gateway")
 
 @app.command()
 def index():
@@ -33,16 +33,16 @@ def index():
 
 @app.command()
 def server():
-    """Start the MCP Semantic Gateway HTTP/SSE server."""
+    """Start the MCPSemanticGateway HTTP/SSE server."""
     from mcp_semantic_gateway.integration.server import start_server
     start_server()
 
 @app.command()
 def proxy():
     """Start the MCP proxy wrapper."""
-    from mcp_semantic_gateway.integration.proxy import MCP Semantic GatewayProxy
+    from mcp_semantic_gateway.integration.proxy import MCPSemanticGatewayProxy
     import asyncio
-    proxy = MCP Semantic GatewayProxy()
+    proxy = MCPSemanticGatewayProxy()
     asyncio.run(proxy.run())
 
 @app.command()
