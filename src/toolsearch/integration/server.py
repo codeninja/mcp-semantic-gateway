@@ -5,6 +5,7 @@ from toolsearch.config.loader import load_config
 from toolsearch.storage.init import initialize_data_dir
 from toolsearch.retrieval.core import SearchCore
 from pathlib import Path
+from typing import Optional, Dict, List
 import asyncio
 import json
 
