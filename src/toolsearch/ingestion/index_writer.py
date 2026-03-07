@@ -21,26 +21,28 @@ async def run_indexing():
     from toolsearch.ingestion.collector import Collector
     collector = Collector(config)
     
-    typer.echo("Collecting tools from all sources...")
-    mcp_tools = await collector.collect_all()
+    typer.echo("Collecting items from all sources...")
+    all_harvested = await collector.collect_all()
     
     all_tools = []
     all_texts = []
     
-    for t in mcp_tools:
+    for t in all_harvested:
         server_id = t["_server_id"]
+        item_type = t["_item_type"]
         text = build_embedding_text(t["name"], t.get("title"), t.get("description"))
         record = ToolRecord(
-            tool_id=f"{server_id}::{t['name']}",
+            tool_id=f"{server_id}::{item_type}::{t['name']}",
             server_id=server_id,
             name=t["name"],
             title=t.get("title"),
             description=t.get("description"),
-            input_schema=t.get("inputSchema"),
+            input_schema=t.get("inputSchema") if item_type == "tool" else t.get("arguments"),
             annotations=t.get("annotations"),
             embedding_text=text,
             indexed_at=datetime.utcnow().isoformat(),
-            index_version=1
+            index_version=1,
+            item_type=item_type
         )
         all_tools.append(record)
         all_texts.append(text)

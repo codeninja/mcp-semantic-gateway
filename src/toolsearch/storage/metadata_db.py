@@ -19,6 +19,7 @@ class ToolRecord:
     embedding_text: str = ""
     indexed_at: str = ""
     index_version: int = 0
+    item_type: str = "tool"
 
 class MetadataDB:
     def __init__(self, db_path: Path):
@@ -52,6 +53,7 @@ class MetadataDB:
                     embedding_text TEXT,
                     indexed_at TEXT,
                     index_version INTEGER,
+                    item_type TEXT DEFAULT 'tool',
                     FOREIGN KEY(server_id) REFERENCES servers(server_id)
                 )
             """)
@@ -70,13 +72,13 @@ class MetadataDB:
                 INSERT OR REPLACE INTO tools (
                     tool_id, server_id, name, title, description, 
                     input_schema, output_schema, annotations, 
-                    embedding_text, indexed_at, index_version
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    embedding_text, indexed_at, index_version, item_type
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 tool.tool_id, tool.server_id, tool.name, tool.title, tool.description,
                 json.dumps(tool.input_schema) if tool.input_schema else None,
                 json.dumps(tool.output_schema) if tool.output_schema else None,
                 json.dumps(tool.annotations) if tool.annotations else None,
-                tool.embedding_text, tool.indexed_at, tool.index_version
+                tool.embedding_text, tool.indexed_at, tool.index_version, tool.item_type
             ))
             await db.commit()

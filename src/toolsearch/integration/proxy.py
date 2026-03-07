@@ -36,20 +36,52 @@ class ToolSearchProxy:
             
             if method == "tools/list":
                 tools = await self.core.get_filtered_tools("local-proxy")
-                tools.append({
-                    "name": "toolsearch_context",
-                    "description": "Set context",
-                    "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}}
-                })
+                tools.extend([
+                    {
+                        "name": "toolsearch_context",
+                        "description": "Set context",
+                        "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}}
+                    },
+                    {
+                        "name": "toolsearch_find_prompts",
+                        "description": "Search for prompts",
+                        "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}}
+                    },
+                    {
+                        "name": "toolsearch_find_skills",
+                        "description": "Search for skills",
+                        "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}}
+                    }
+                ])
                 resp = {"jsonrpc": "2.0", "id": req["id"], "result": {"tools": tools}}
+                sys.stdout.write(json.dumps(resp) + "\n")
+                sys.stdout.flush()
+            elif method == "prompts/list":
+                prompts = await self.core.get_filtered_prompts("local-proxy")
+                resp = {"jsonrpc": "2.0", "id": req["id"], "result": {"prompts": prompts}}
                 sys.stdout.write(json.dumps(resp) + "\n")
                 sys.stdout.flush()
             elif method == "tools/call":
                 name = req["params"]["name"]
+                args = req["params"].get("arguments", {})
                 if name == "toolsearch_context":
-                    query = req["params"]["arguments"]["query"]
+                    query = args["query"]
                     self.core.set_context("local-proxy", query)
                     resp = {"jsonrpc": "2.0", "id": req["id"], "result": {"content": [{"type": "text", "text": "Context set"}]}}
+                    sys.stdout.write(json.dumps(resp) + "\n")
+                    sys.stdout.flush()
+                elif name == "toolsearch_find_prompts":
+                    query = args.get("query", "")
+                    self.core.set_context("search_tmp", query, ttl=10)
+                    items = await self.core.get_filtered_prompts("search_tmp")
+                    resp = {"jsonrpc": "2.0", "id": req["id"], "result": {"content": [{"type": "text", "text": json.dumps(items)}]}}
+                    sys.stdout.write(json.dumps(resp) + "\n")
+                    sys.stdout.flush()
+                elif name == "toolsearch_find_skills":
+                    query = args.get("query", "")
+                    self.core.set_context("search_tmp", query, ttl=10)
+                    items = await self.core.get_filtered_skills("search_tmp")
+                    resp = {"jsonrpc": "2.0", "id": req["id"], "result": {"content": [{"type": "text", "text": json.dumps(items)}]}}
                     sys.stdout.write(json.dumps(resp) + "\n")
                     sys.stdout.flush()
                 else:

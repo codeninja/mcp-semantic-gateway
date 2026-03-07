@@ -80,34 +80,95 @@ class MCPClient:
                 pass
         return tools
 
+    async def call_prompts_list(self) -> List[dict]:
+        if not self.process or not self.process.stdin or not self.process.stdout:
+            raise RuntimeError("Server not started")
+            
+        list_req = {
+            "jsonrpc": "2.0",
+            "id": 102,
+            "method": "prompts/list",
+            "params": {}
+        }
+        self.process.stdin.write((json.dumps(list_req) + "\n").encode())
+        await self.process.stdin.drain()
+        
+        prompts = []
+        while True:
+            line = await self.process.stdout.readline()
+            if not line: break
+            resp = json.loads(line)
+            if resp.get("id") == 102:
+                result = resp.get("result", {})
+                prompts.extend(result.get("prompts", []))
+                if not result.get("nextCursor"):
+                    break
+        return prompts
+
 class Collector:
     def __init__(self, config: ToolSearchConfig):
         self.config = config
 
     async def collect_all(self) -> List[dict]:
-        all_tools = []
+        all_items = []
         for server_id, server_cfg in self.config.servers.items():
             if not server_cfg.enabled:
                 continue
             
             try:
                 if server_cfg.type == SourceType.OPENAPI:
-                    tools = await self.collect_openapi(server_id, server_cfg)
+                    items = await self.collect_openapi(server_id, server_cfg)
+                    for i in items: i["_item_type"] = "tool"
+                elif server_cfg.type == SourceType.SKILL:
+                    items = await self.collect_skills(server_id, server_cfg)
+                    for i in items: i["_item_type"] = "skill"
                 else:
                     client = MCPClient(server_id, server_cfg)
                     await client.start()
                     try:
                         tools = await client.call_tools_list()
+                        for t in tools: t["_item_type"] = "tool"
+                        
+                        prompts = await client.call_prompts_list()
+                        for p in prompts: p["_item_type"] = "prompt"
+                        
+                        items = tools + prompts
                     finally:
                         await client.stop()
                 
-                # Add server_id prefix to tool info for indexing
-                for t in tools:
-                    t["_server_id"] = server_id
-                all_tools.extend(tools)
+                for i in items:
+                    i["_server_id"] = server_id
+                all_items.extend(items)
             except Exception as e:
                 print(f"Error collecting from {server_id}: {e}")
-        return all_tools
+        return all_items
+
+    async def collect_skills(self, server_id: str, config: ServerConfig) -> List[dict]:
+        if not config.path:
+            raise ValueError(f"Path required for Skill source: {server_id}")
+        
+        skills = []
+        path = Path(config.path).expanduser()
+        if not path.exists():
+            return []
+            
+        # Recursive scan for SKILL.md
+        for skill_file in path.rglob("SKILL.md"):
+            try:
+                content = skill_file.read_text()
+                # Simplified parsing for V1: Extract first header as name, rest as description
+                lines = content.splitlines()
+                name = lines[0].strip("# ").strip() if lines else skill_file.parent.name
+                description = "\n".join(lines[1:]).strip()
+                
+                skills.append({
+                    "name": name,
+                    "description": description[:1000], # Cap description for embedding
+                    "annotations": {"path": str(skill_file)}
+                })
+            except Exception as e:
+                print(f"Error reading skill {skill_file}: {e}")
+        return skills
 
     async def collect_openapi(self, server_id: str, config: ServerConfig) -> List[dict]:
         if not config.url:

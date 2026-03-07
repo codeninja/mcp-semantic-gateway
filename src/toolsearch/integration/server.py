@@ -71,18 +71,51 @@ async def message_endpoint(
     if method == "tools/list":
         tools = await core.get_filtered_tools(x_tenant_id)
         # Add internal search tools
-        tools.append({
-            "name": "toolsearch_context",
-            "description": "Set discovery context",
-            "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}}
-        })
+        tools.extend([
+            {
+                "name": "toolsearch_context",
+                "description": "Set discovery context",
+                "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}}
+            },
+            {
+                "name": "toolsearch_find_prompts",
+                "description": "Search for prompts semantically",
+                "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}}
+            },
+            {
+                "name": "toolsearch_find_skills",
+                "description": "Search for skills semantically",
+                "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}}
+            }
+        ])
         return {
             "jsonrpc": "2.0",
             "id": body.get("id"),
             "result": {"tools": tools}
         }
     
-    # tools/call routing would go here (dispatch to upstream clients)
+    if method == "prompts/list":
+        prompts = await core.get_filtered_prompts(x_tenant_id)
+        return {
+            "jsonrpc": "2.0",
+            "id": body.get("id"),
+            "result": {"prompts": prompts}
+        }
+    
+    if method == "tools/call":
+        name = body["params"]["name"]
+        args = body["params"].get("arguments", {})
+        if name == "toolsearch_find_prompts":
+            query = args.get("query", "")
+            # Temporarily override context for this search
+            core.set_context(f"{x_tenant_id}_search", query, ttl=10)
+            items = await core.get_filtered_prompts(f"{x_tenant_id}_search")
+            return {"jsonrpc": "2.0", "id": body["id"], "result": {"content": [{"type": "text", "text": json.dumps(items, indent=2)}]}}
+        if name == "toolsearch_find_skills":
+            query = args.get("query", "")
+            core.set_context(f"{x_tenant_id}_search", query, ttl=10)
+            items = await core.get_filtered_skills(f"{x_tenant_id}_search")
+            return {"jsonrpc": "2.0", "id": body["id"], "result": {"content": [{"type": "text", "text": json.dumps(items, indent=2)}]}}
     return {"jsonrpc": "2.0", "id": body.get("id"), "error": {"code": -32601, "message": "Method not implemented"}}
 
 def start_server():

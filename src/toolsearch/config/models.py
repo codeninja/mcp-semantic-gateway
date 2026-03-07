@@ -19,12 +19,14 @@ class FallbackBehavior(str, Enum):
 class SourceType(str, Enum):
     MCP = "mcp"
     OPENAPI = "openapi"
+    SKILL = "skill"
 
 class ServerConfig(BaseModel):
     type: SourceType = SourceType.MCP
     command: Optional[str] = None
     args: List[str] = Field(default_factory=list)
     url: Optional[str] = None  # For OpenAPI specs
+    path: Optional[str] = None # For Skills
     env: Dict[str, str] = Field(default_factory=dict)
     enabled: bool = True
     tags: List[str] = Field(default_factory=list)
