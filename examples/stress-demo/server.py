@@ -1,40 +1,34 @@
-import random
-from fastmcp import FastMCP
-from faker import Faker
+import sys
+import json
+import time
 
-# Create an MCP server
-mcp = FastMCP("ToolSearch-Stress-Demo")
-fake = Faker()
+def main():
+    # Simple MCP server with 250 tools for stress testing
+    tools = []
+    for i in range(250):
+        tools.append({
+            "name": f"tool_{i}",
+            "description": f"This is tool number {i}. It performs operation {i % 10} on category {i // 25}.",
+            "inputSchema": {"type": "object", "properties": {"val": {"type": "number"}}}
+        })
 
-def create_server():
-    # Define 25 categories for our tools
-    CATEGORIES = [
-        "Greetings", "Apologies", "Encouragement", "Technical_Support", "Sales",
-        "Customer_Service", "Product_Launch", "Bug_Report", "Feature_Request", "Billing",
-        "Security", "Infrastructure", "Marketing", "Human_Resources", "Legal",
-        "Feedback", "Networking", "Database", "Frontend", "Backend",
-        "Mobile", "Testing", "DevOps", "Documentation", "Analytics"
-    ]
-
-    for cat in CATEGORIES:
-        for i in range(1, 11):
-            tool_name = f"{cat.lower()}_phrase_{i}"
+    for line in sys.stdin:
+        try:
+            req = json.loads(line)
+            method = req.get("method")
+            if method == "initialize":
+                resp = {"jsonrpc": "2.0", "id": req["id"], "result": {"protocolVersion": "2024-11-05", "capabilities": {}, "serverInfo": {"name": "StressDemo", "version": "1.0.0"}}}
+            elif method == "tools/list":
+                resp = {"jsonrpc": "2.0", "id": req["id"], "result": {"tools": tools}}
+            else:
+                resp = {"jsonrpc": "2.0", "id": req["id"], "result": {}}
             
-            # Using a closure to capture category and index
-            def make_phrase_tool(c, idx):
-                @mcp.tool(name=f"{c.lower()}_phrase_{idx}")
-                def phrase_tool(name: str = "Dallas") -> str:
-                    """
-                    Returns a specific category-based phrase.
-                    Use this tool when you need a phrase related to category {c}.
-                    """
-                    return f"Phrase for {c}: {fake.sentence()} (ID: {idx})"
-                return phrase_tool
-            
-            make_phrase_tool(cat, i)
-
-# Initialize 250 tools
-create_server()
+            sys.stdout.write(json.dumps(resp) + "\n")
+            sys.stdout.flush()
+        except EOFError:
+            break
+        except Exception:
+            break
 
 if __name__ == "__main__":
-    mcp.run()
+    main()
