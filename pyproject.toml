@@ -1,5 +1,5 @@
 [project]
-name = "toolsearch"
+name = "openclaw-toolsearch"
 version = "0.1.0"
 description = "Semantic Tool Discovery Middleware for MCP"
 readme = "README.md"
