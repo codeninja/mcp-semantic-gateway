@@ -22,7 +22,7 @@ The MCP Semantic Gateway library has been upgraded with a production-ready HTTP/
 ## Updated Usage
 ```bash
 # Start the production HTTP server
-uv run mcp-semantic-gateway server
+uv run MCP Semantic Gateway server
 
 # Set context via HTTP
 curl -X POST http://localhost:8000/context \

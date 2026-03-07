@@ -10,7 +10,7 @@ Core components of the MCP Semantic Gateway library are functional.
 5. **Storage**: 
     - **Metadata**: SQLite database (aiosqlite) stores tool records and server info.
     - **Vector Store**: `hnswlib` is used for efficient cosine similarity search.
-6. **Indexing Pipeline**: `mcp-semantic-gateway index` command orchestrates collection, embedding, and storage. Successfully indexed 250 tools from the stress-demo server.
+6. **Indexing Pipeline**: `MCP Semantic Gateway index` command orchestrates collection, embedding, and storage. Successfully indexed 250 tools from the stress-demo server.
 7. **Retrieval**: `QueryEngine` provides ranked semantic search results.
 8. **MCP Proxy**: Core stdio-to-stdio proxy implemented with `mcp_semantic_gateway_context` support for dynamic filtering.
 
