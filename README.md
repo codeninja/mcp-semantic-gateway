@@ -110,9 +110,6 @@ We are building the "Garbage Collector for the Context Window," and we want your
 3.  Run the E2E suite: `uv run pytest tests/test_e2e.py`.
 4.  Submit a PR!
 
-### Community
-Join Dallas and the team in the [OpenClaw Discord](https://discord.gg/clawd) to discuss the future of agentic infrastructure.
-
 ---
 
-*Built by [codeninja](https://github.com/codeninja) and the OpenClaw Agentic Dev Team.*
+*Built by [codeninja](https://github.com/codeninja) and a Custom Agentic Development Engine*
