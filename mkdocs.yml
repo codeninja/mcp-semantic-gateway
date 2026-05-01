@@ -27,6 +27,17 @@ nav:
       - Core: api/core.md
       - Ingestion: api/ingestion.md
       - Integration: api/integration.md
+  - Design:
+      - API Introspection & Generated Skills:
+          - Overview: design/api-introspection-skills/README.md
+          - Atlas: design/api-introspection-skills/01-atlas.md
+          - Skill Packages: design/api-introspection-skills/02-skill-packages.md
+          - Storage & Retrieval: design/api-introspection-skills/03-storage-and-retrieval.md
+          - Planner: design/api-introspection-skills/04-planner.md
+          - Synthesis & Validation: design/api-introspection-skills/05-synthesis-and-validation.md
+          - Caching & Updates: design/api-introspection-skills/06-caching-and-updates.md
+          - Module Layout: design/api-introspection-skills/07-module-layout.md
+          - Phasing: design/api-introspection-skills/08-phasing.md
   - Contributing: contributing.md
 
 markdown_extensions:
