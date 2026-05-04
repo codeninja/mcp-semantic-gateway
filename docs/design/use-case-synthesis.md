@@ -447,13 +447,21 @@ noted. Skill-generation tasks live in
   `ForgeEngine` annotations? Required for the tag-grouping path; without
   it the chunker can only use the path-segment grouping rule for every
   OpenAPI source.
+
+  - Yes; tags are plumbed through `annotations.tags` as a list of strings.
+    - Task: update `ForgeEngine.forge_tools` to extract operation tags into `annotations.tags`.
 - **Embedding kind separation** — should use cases share the existing
   HNSW index with tools/prompts/skills, or live in a sibling index?
   Sharing is simpler; separating lets us tune per-kind. Default:
   share for v1.
+  
+  - They may share the index. Use-case records have a `kind` field set to `use_case`, and retrieval filters on that. Future work can migrate to a separate index if needed.
+
 - **Cost-estimate source** — hard-code provider rate cards into the
   observability layer, or read from `[llm.pricing]` config? Default:
   config block with sensible defaults.
+
+  - we don't need to track costs but we should report usage, tokens, and convert to cost if cost per token is available. It's a nice to have feature which we should be able to introspect on the provider to get. Irrelevant for local models.  
 
 ## What this design intentionally does NOT cover
 
