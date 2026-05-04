@@ -49,7 +49,7 @@ Out of scope (deliberately deferred):
 | U-1 | LLM abstraction exposes two transports — Anthropic native and OpenAI-compatible — covering Anthropic, OpenAI, OpenRouter, Google (via OpenAI-compatible endpoint), and local runtimes (Ollama, llama.cpp, vLLM). |
 | U-2 | Structured output uses tool-use / function-calling on every transport. No freeform JSON parsing. |
 | U-3 | Use case mining runs in chunks. Default chunk size: 12 tools. Per-chunk LLM call. |
-| U-4 | OpenAPI chunk grouping ranked by precedence: (1) operation `tags[]`, (2) first path segment, (3) ordered fixed-size. **Open: confirm tags must be plumbed through `ForgeEngine` annotations.** |
+| U-4 | OpenAPI chunk grouping ranked by precedence: (1) operation `tags[]`, (2) first path segment, (3) ordered fixed-size. **Resolved: tags are surfaced via `annotations.tags: list[str]` from `ForgeEngine.forge_tools`.** |
 | U-5 | Live MCP server chunk grouping ranked by precedence: (1) shared name-prefix, (2) ordered fixed-size. |
 | U-6 | Use case mining is opt-in per server (`generate_skills: bool = false` on `ServerConfig`). Existing users get no surprise LLM bills. |
 | U-7 | Cache key: `(server_id, source_hash, chunk_hash, model_id, prompt_version)`. Re-running on unchanged source = zero LLM calls. |
@@ -395,51 +395,51 @@ noted. Skill-generation tasks live in
 
 ### Phase A — LLM abstraction
 
-- [ ] `llm/base.py` — `Message`, `ToolSpec`, `UsageStats`, `LLMResponse`, `LLMProvider` Protocol.
-- [ ] `llm/anthropic_provider.py` — Anthropic SDK adapter, prompt caching on system + tool-catalog blocks, retry/backoff.
-- [ ] `llm/openai_compatible_provider.py` — OpenAI SDK adapter with `base_url` override, function-calling for structured output.
-- [ ] `llm/factory.py` — `build_llm(LLMConfig) -> LLMProvider` dispatch.
-- [ ] `config/models.py` — `LLMConfig` model, validation (api_key_env resolves, base_url required for openai-compatible).
-- [ ] Stub provider for tests (`tests/_stub_llm.py`) returning canned tool-call responses.
-- [ ] Unit test: each adapter invoked with mocked HTTP; structured-output path returns parsed args.
+- [x] `llm/base.py` — `Message`, `ToolSpec`, `UsageStats`, `LLMResponse`, `LLMProvider` Protocol.
+- [x] `llm/anthropic_provider.py` — Anthropic SDK adapter, prompt caching on system + tool-catalog blocks, retry/backoff.
+- [x] `llm/openai_compatible_provider.py` — OpenAI SDK adapter with `base_url` override, function-calling for structured output.
+- [x] `llm/factory.py` — `build_llm(LLMConfig) -> LLMProvider` dispatch.
+- [x] `config/models.py` — `LLMConfig` model, validation (api_key_env resolves, base_url required for openai-compatible).
+- [x] Stub provider for tests (`tests/_stub_llm.py`) returning canned tool-call responses.
+- [x] Unit test: each adapter invoked with mocked HTTP; structured-output path returns parsed args.
 
 ### Phase B — Chunking
 
-- [ ] Plumb `tags[]` through `ForgeEngine.forge_tools` into `annotations.tags`. **Decision U-4 confirmation needed.**
-- [ ] `ingestion/chunker.py` — `ToolChunk`, `chunk_tools(harvested, server_id, source_hash)` with the precedence rules above.
-- [ ] Source-hash helpers: canonical form for OpenAPI specs and for live MCP `(name, description)` lists.
-- [ ] Unit tests: tagged OpenAPI spec chunks by tag; untagged chunks by path-prefix; oversized groups split correctly; live MCP path produces stable chunk_ids.
+- [x] Plumb `tags[]` through `ForgeEngine.forge_tools` into `annotations.tags`. **Decision U-4 confirmation needed.**
+- [x] `ingestion/chunker.py` — `ToolChunk`, `chunk_tools(harvested, server_id, source_hash)` with the precedence rules above.
+- [x] Source-hash helpers: canonical form for OpenAPI specs and for live MCP `(name, description)` lists.
+- [x] Unit tests: tagged OpenAPI spec chunks by tag; untagged chunks by path-prefix; oversized groups split correctly; live MCP path produces stable chunk_ids.
 
 ### Phase C — Use case mining
 
-- [ ] `storage/metadata_db.py` — `use_cases` table + migration.
-- [ ] `ingestion/use_case_miner.py` — `UseCaseRecord` dataclass, `mine_chunk(chunk, llm)`, `mine_source(server_id, tools, llm)`.
-- [ ] Use-case extraction tool schema + system/user prompt templates (versioned `v1`).
-- [ ] Per-record validation (length, tool-name resolution, confidence range).
-- [ ] Per-chunk + per-source cache lookup before LLM call.
-- [ ] Embed + persist use case records to existing vector store under a `use_case` item kind.
-- [ ] Integration test: mock OpenAPI spec → stub LLM → expected use case rows in DB + vectors.
+- [x] `storage/metadata_db.py` — `use_cases` table + migration.
+- [x] `ingestion/use_case_miner.py` — `UseCaseRecord` dataclass, `mine_chunk(chunk, llm)`, `mine_source(server_id, tools, llm)`.
+- [x] Use-case extraction tool schema + system/user prompt templates (versioned `v1`).
+- [x] Per-record validation (length, tool-name resolution, confidence range).
+- [x] Per-chunk + per-source cache lookup before LLM call.
+- [x] Embed + persist use case records to existing vector store under a `use_case` item kind.
+- [x] Integration test: mock OpenAPI spec → stub LLM → expected use case rows in DB + vectors.
 
 ### Phase D — Observability
 
-- [ ] `ingestion/observability.py` — `SynthesisRun`, `EventEmitter`, structured event types.
-- [ ] JSONL writer to configured `synthesis_log` path (default `~/.mcp_semantic_gateway/logs/synthesis.jsonl`).
-- [ ] Rich progress bars wired into `EventEmitter`.
-- [ ] Diagnostics writer for `chunk_failed` and `record_rejected` events.
-- [ ] Run summary renderer.
-- [ ] Test: emitter produces well-formed events; JSONL roundtrips; progress bar advances on emitted events.
+- [x] `ingestion/observability.py` — `SynthesisRun`, `EventEmitter`, structured event types.
+- [x] JSONL writer to configured `synthesis_log` path (default `~/.mcp_semantic_gateway/logs/synthesis.jsonl`).
+- [x] Rich progress bars wired into `EventEmitter`.
+- [x] Diagnostics writer for `chunk_failed` and `record_rejected` events.
+- [x] Run summary renderer.
+- [x] Test: emitter produces well-formed events; JSONL roundtrips; progress bar advances on emitted events.
 
 ### Phase E — CLI
 
-- [ ] `cli/main.py` — `synth` command (with `--server`, `--dry-run`).
-- [ ] `cli/main.py` — `synth status` command (table from `use_cases` table).
-- [ ] Smoke test: `synth --dry-run` on the existing OpenAPI fixture prints chunks without LLM calls.
+- [x] `cli/main.py` — `synth` command (with `--server`, `--dry-run`).
+- [x] `cli/main.py` — `synth status` command (table from `use_cases` table).
+- [x] Smoke test: `synth --dry-run` on the existing OpenAPI fixture prints chunks without LLM calls.
 
 ### Phase F — Documentation and exit
 
-- [ ] Update `README.md` with synth opt-in instructions.
-- [ ] Update this doc's decisions log with any deltas observed during implementation.
-- [ ] Confirm decision U-4 outcome (tags-through-Forge) and remove the open marker.
+- [x] Update `README.md` with synth opt-in instructions.
+- [x] Update this doc's decisions log with any deltas observed during implementation.
+- [x] Confirm decision U-4 outcome (tags-through-Forge) and remove the open marker.
 
 ## Open questions
 

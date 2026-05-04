@@ -49,6 +49,44 @@ MCP Semantic Gateway embeds your tool descriptions locally using `all-MiniLM-L6-
 mcp-semantic-gateway index
 ```
 
+### 2a. (Optional) Synthesize Use Cases & Skills
+For OpenAPI sources you opt into skill generation, the gateway can mine
+real-world use cases out of the harvested tools and synthesize agent-skills-spec
+SKILL.md packages so retrieval can match on workflow intent, not just tool
+names.
+
+```toml
+[llm]
+provider = "anthropic"          # or "openai-compatible"
+model = "claude-sonnet-4-6"
+api_key_env = "ANTHROPIC_API_KEY"
+
+[servers.petstore]
+type = "openapi"
+url = "https://petstore3.swagger.io/api/v3/openapi.yaml"
+generate_skills = true          # opt-in per server
+```
+
+```bash
+# Mine + cluster + synthesize
+mcp-semantic-gateway synth
+
+# Or layer a provider config without editing config.toml:
+mcp-semantic-gateway synth --config-overlay .env.openai
+
+# Add a Skill-type server entry pointing at the generated skills
+mcp-semantic-gateway synth init-skill-source
+
+# Re-index so generated skills land in the vector store
+mcp-semantic-gateway index
+
+# Inspect status
+mcp-semantic-gateway synth status
+```
+
+Re-running `synth` against the same source with the same model + prompt
+version is a free no-op (cache hit).
+
 ### 3. Connect Your Agent
 Point your client to the MCP Semantic Gateway Proxy.
 

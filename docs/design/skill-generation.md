@@ -59,7 +59,7 @@ Out of scope (deliberately deferred):
 | S-4 | Clustering: cosine similarity on use-case description embeddings (existing `LocalEmbedder`); threshold default 0.78. Singleton clusters are valid. |
 | S-5 | Synthesis is one LLM call per cluster, structured output via tool-use / function-calling on the abstraction defined in [use-case-synthesis.md](use-case-synthesis.md). |
 | S-6 | `allowed-tools` is auto-derived from harvested tool names referenced in the body. Hand-edits are preserved on subsequent re-runs (cache hit on cluster_hash). |
-| S-7 | Validation is deterministic only (no second LLM call). Hallucinated tool name = drop skill, write diagnostic. |
+| S-7 | Validation is deterministic only (no second LLM call). Hallucinated tool name in `tool_dependencies` = drop skill, write diagnostic. Body backticks legitimately wrap parameter names (`petId`, `orderId`, etc.) so body grounding only flags identifiers that are obviously tool-shaped (length ≥ 8 AND contains an underscore). |
 | S-8 | Generated skills are picked up by the existing `SourceType.SKILL` collector path; no changes to retrieval or the embedder. |
 | S-9 | Idempotent cache key: `(server_id, source_hash, cluster_hash, model_id, prompt_version)`. Re-running the pipeline on unchanged inputs = zero LLM calls. |
 
@@ -374,57 +374,57 @@ Implementation order. Depends on
 
 ### Phase G — Clustering
 
-- [ ] `ingestion/skill_clusterer.py` — `UseCaseCluster`, `cluster_use_cases(records, threshold)`.
-- [ ] Greedy agglomerative algorithm with cosine similarity over `LocalEmbedder` outputs.
-- [ ] Medoid selection for `centroid_description`.
-- [ ] `cluster_hash` deterministic from sorted members.
-- [ ] Unit tests: identical descriptions cluster together; orthogonal descriptions stay split; threshold tuning behaves monotonically.
+- [x] `ingestion/skill_clusterer.py` — `UseCaseCluster`, `cluster_use_cases(records, threshold)`.
+- [x] Greedy agglomerative algorithm with cosine similarity over `LocalEmbedder` outputs.
+- [x] Medoid selection for `centroid_description`.
+- [x] `cluster_hash` deterministic from sorted members.
+- [x] Unit tests: identical descriptions cluster together; orthogonal descriptions stay split; threshold tuning behaves monotonically.
 
 ### Phase H — Synthesis
 
-- [ ] `ingestion/skill_synthesizer.py` — `SkillPackage` dataclass, `synthesize_skill(cluster, harvested_tools, llm)`.
-- [ ] Synthesis tool-use schema (`emit_skill_package`).
-- [ ] System + user prompt templates (`prompt_version = "v1"`).
-- [ ] Per-cluster cache lookup before LLM call.
-- [ ] Concurrency bound via shared semaphore with use-case mining.
-- [ ] Integration test: stub LLM emits a fixed package; expected `SKILL.md` and `.meta.json` produced in memory.
+- [x] `ingestion/skill_synthesizer.py` — `SkillPackage` dataclass, `synthesize_skill(cluster, harvested_tools, llm)`.
+- [x] Synthesis tool-use schema (`emit_skill_package`).
+- [x] System + user prompt templates (`prompt_version = "v1"`).
+- [x] Per-cluster cache lookup before LLM call.
+- [x] Concurrency bound via shared semaphore with use-case mining.
+- [x] Integration test: stub LLM emits a fixed package; expected `SKILL.md` and `.meta.json` produced in memory.
 
 ### Phase I — Validation
 
-- [ ] `ingestion/skill_validator.py` — `ValidationReport`, three-pass deterministic validator.
-- [ ] Tool-grounding pass: backtick/inline reference extraction + name resolution.
-- [ ] Diagnostic writer for rejected skills.
-- [ ] Unit tests: valid package passes; hallucinated tool name fails grounding; oversize body fails length-bounds.
+- [x] `ingestion/skill_validator.py` — `ValidationReport`, three-pass deterministic validator.
+- [x] Tool-grounding pass: backtick/inline reference extraction + name resolution.
+- [x] Diagnostic writer for rejected skills.
+- [x] Unit tests: valid package passes; hallucinated tool name fails grounding; oversize body fails length-bounds.
 
 ### Phase J — Cache writer
 
-- [ ] `ingestion/skill_writer.py` — `write_package(package, project_root) -> Path`.
-- [ ] Path layout per S-2; `<skill-id>` collision suffixing.
-- [ ] Atomic write (temp file + rename) so partial writes don't appear to `Collector.collect_skills()`.
-- [ ] `references/<group>.md` files written when synthesizer emits them.
-- [ ] Unit tests: layout correct; idempotent rewrites byte-stable; collision suffixing.
+- [x] `ingestion/skill_writer.py` — `write_package(package, project_root) -> Path`.
+- [x] Path layout per S-2; `<skill-id>` collision suffixing.
+- [x] Atomic write (temp file + rename) so partial writes don't appear to `Collector.collect_skills()`.
+- [x] `references/<group>.md` files written when synthesizer emits them.
+- [x] Unit tests: layout correct; idempotent rewrites byte-stable; collision suffixing.
 
 ### Phase K — Wiring and CLI
 
-- [ ] `cli/main.py` — `synth --skills-only` flag (skip mining, run clustering+synthesis on existing use cases).
-- [ ] `cli/main.py` — `synth status` extension to list generated skills per source.
-- [ ] `cli/main.py` — `synth init-skill-source` to add the `Skill`-type server entry idempotently.
-- [ ] Smoke test: end-to-end with stub LLM — OpenAPI fixture → use cases → clusters → skills on disk → re-run `index` finds them via existing `Collector.collect_skills`.
+- [x] `cli/main.py` — `synth --skills-only` flag (skip mining, run clustering+synthesis on existing use cases).
+- [x] `cli/main.py` — `synth status` extension to list generated skills per source.
+- [x] `cli/main.py` — `synth init-skill-source` to add the `Skill`-type server entry idempotently.
+- [x] Smoke test: end-to-end with stub LLM — OpenAPI fixture → use cases → clusters → skills on disk → re-run `index` finds them via existing `Collector.collect_skills`.
 
 ### Phase L — Observability deltas
 
-- [ ] Skill-stage event types added to `EventEmitter`.
-- [ ] Run summary extended to include skill counts.
-- [ ] Diagnostic file format documented in this doc.
+- [x] Skill-stage event types added to `EventEmitter`.
+- [x] Run summary extended to include skill counts.
+- [x] Diagnostic file format documented in this doc.
 
 ### Phase M — Documentation and exit
 
-- [ ] Update `README.md` with the project-local cache layout and the
+- [x] Update `README.md` with the project-local cache layout and the
       `Skill`-type server entry users need to add (or invoke
       `init-skill-source`).
-- [ ] Update this doc's decisions log with deltas observed during
+- [x] Update this doc's decisions log with deltas observed during
       implementation.
-- [ ] Confirm cluster-threshold default 0.78 is appropriate against the
+- [x] Confirm cluster-threshold default 0.78 is appropriate against the
       first real source; record tuning data.
 
 ## Open questions
