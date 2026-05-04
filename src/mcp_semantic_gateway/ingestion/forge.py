@@ -24,11 +24,13 @@ class ForgeEngine:
                 input_schema = ForgeEngine._map_parameters(operation, spec)
                 
                 # Metadata for execution routing later
+                tags = operation.get("tags", []) or []
                 annotations = {
                     "source": "openapi",
                     "method": method.upper(),
                     "path": path,
-                    "base_url": base_url
+                    "base_url": base_url,
+                    "tags": list(tags),
                 }
 
                 tools.append({
