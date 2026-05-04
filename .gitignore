@@ -34,3 +34,4 @@ Thumbs.db
 .ruff_cache
 
 .claude/worktrees/
+.mcp_semantic_gateway/

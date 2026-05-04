@@ -5,9 +5,47 @@ import signal
 import httpx
 import yaml
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from mcp_semantic_gateway.config.models import SourceType, MCPSemanticGatewayConfig, ServerConfig
 from mcp_semantic_gateway.ingestion.forge import ForgeEngine
+
+
+def _parse_skill_md(content: str, skill_file: Path) -> Tuple[str, str, List[str]]:
+    """Parse a SKILL.md file.
+
+    Returns (name, description, allowed_tools). Supports the agent-skills
+    spec format (YAML frontmatter delimited by ``---``) and falls back to
+    the legacy heuristic (line 1 = name) when no frontmatter is present.
+    """
+
+    if content.startswith("---\n"):
+        end = content.find("\n---\n", 4)
+        if end != -1:
+            front_text = content[4:end]
+            body = content[end + 5:].strip()
+            try:
+                front = yaml.safe_load(front_text) or {}
+            except yaml.YAMLError:
+                front = {}
+            if isinstance(front, dict):
+                name = (front.get("name") or skill_file.parent.name).strip()
+                description = (front.get("description") or "").strip()
+                allowed = front.get("allowed-tools") or []
+                if not isinstance(allowed, list):
+                    allowed = []
+                # Combine description + body so the embedder gets the full
+                # surface area of the skill, not just the YAML summary.
+                combined = description if not body else f"{description}\n\n{body}".strip()
+                return name, combined, [str(t) for t in allowed]
+    # Legacy fallback: first non-empty line = name; rest = description.
+    lines = content.splitlines()
+    if lines:
+        name = lines[0].lstrip("#").strip() or skill_file.parent.name
+        description = "\n".join(lines[1:]).strip()
+    else:
+        name = skill_file.parent.name
+        description = ""
+    return name, description, []
 
 class MCPClient:
     def __init__(self, server_id: str, config: ServerConfig):
@@ -146,25 +184,24 @@ class Collector:
     async def collect_skills(self, server_id: str, config: ServerConfig) -> List[dict]:
         if not config.path:
             raise ValueError(f"Path required for Skill source: {server_id}")
-        
+
         skills = []
         path = Path(config.path).expanduser()
         if not path.exists():
             return []
-            
+
         # Recursive scan for SKILL.md
         for skill_file in path.rglob("SKILL.md"):
             try:
                 content = skill_file.read_text()
-                # Simplified parsing for V1: Extract first header as name, rest as description
-                lines = content.splitlines()
-                name = lines[0].strip("# ").strip() if lines else skill_file.parent.name
-                description = "\n".join(lines[1:]).strip()
-                
+                name, description, allowed_tools = _parse_skill_md(content, skill_file)
+                annotations: Dict[str, Any] = {"path": str(skill_file)}
+                if allowed_tools:
+                    annotations["allowed_tools"] = allowed_tools
                 skills.append({
                     "name": name,
-                    "description": description[:1000], # Cap description for embedding
-                    "annotations": {"path": str(skill_file)}
+                    "description": description[:2000],
+                    "annotations": annotations,
                 })
             except Exception as e:
                 print(f"Error reading skill {skill_file}: {e}")

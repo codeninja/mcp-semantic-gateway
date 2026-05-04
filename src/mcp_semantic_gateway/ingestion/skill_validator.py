@@ -256,23 +256,40 @@ def _check_tool_grounding(
             )
         )
 
+    # tool_dependencies is the authoritative declaration; any name there
+    # that does not resolve in the harvested catalog is a hard failure.
     declared = set(package.tool_dependencies)
+    unresolved_declared = sorted(declared - harvested)
 
-    body_candidates = {
-        name
-        for name in _TOOL_REF_PATTERN.findall(package.body_markdown)
-        if len(name) >= _MIN_REFERENCED_NAME_LEN
-    }
-
-    all_referenced = declared | body_candidates
-    unresolved = sorted(all_referenced - harvested)
-
-    if unresolved:
+    if unresolved_declared:
         failures.append(
             ValidationFailure(
                 pass_name="tool-grounding",
                 reason="tool_name_unresolved",
-                details={"unresolved": unresolved},
+                details={"unresolved": unresolved_declared},
+            )
+        )
+
+    # Body backticks legitimately wrap parameter names (e.g., `petId`),
+    # JSON keys, paths, and short variable names. A body-backticked
+    # identifier is flagged ONLY when it is "obviously tool-shaped":
+    # length >= 8 AND contains an underscore (snake_case). That pattern
+    # captures the dominant LLM hallucination (`github_invent_tool`) while
+    # not flagging parameter names like `petId` or short variables.
+    body_candidates = {
+        name
+        for name in _TOOL_REF_PATTERN.findall(package.body_markdown)
+        if len(name) >= 8
+        and "_" in name
+        and name not in harvested
+        and name not in declared
+    }
+    if body_candidates:
+        failures.append(
+            ValidationFailure(
+                pass_name="tool-grounding",
+                reason="tool_name_unresolved",
+                details={"unresolved": sorted(body_candidates)},
             )
         )
 
