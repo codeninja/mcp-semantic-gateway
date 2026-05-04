@@ -28,34 +28,12 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-
-class SkillReference(BaseModel):
-    """A reference file shipped alongside SKILL.md (relative to references/)."""
-
-    filename: str
-    content: str
-
-
-class SkillPackage(BaseModel):
-    """Self-contained skill package shape used by the writer.
-
-    Phase I/H will reconcile to a single canonical definition. Until then,
-    this module owns the type to keep tests independent of parallel work.
-    """
-
-    skill_id: str
-    name: str
-    description: str
-    body_markdown: str
-    tool_dependencies: list[str]
-    references: list[SkillReference] = Field(default_factory=list)
-    server_id: str
-    source_hash: str
-    cluster_id: str
-    cluster_hash: str
-    use_case_ids: list[str]
-    generated_by: str
-    generated_at: Optional[datetime] = None
+# Canonical SkillPackage lives in skill_validator.py. Re-export here so
+# existing call sites (and tests) that import from skill_writer still work.
+from mcp_semantic_gateway.ingestion.skill_validator import (  # noqa: F401
+    SkillPackage,
+    SkillReference,
+)
 
 
 # ---------------------------------------------------------------------------
