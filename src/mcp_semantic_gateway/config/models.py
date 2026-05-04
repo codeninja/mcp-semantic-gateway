@@ -1,5 +1,5 @@
-from typing import Dict, List, Optional
-from pydantic import BaseModel, Field, HttpUrl, validator
+from typing import Dict, List, Literal, Optional
+from pydantic import BaseModel, Field, HttpUrl, field_validator, validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from enum import Enum
 
@@ -31,6 +31,7 @@ class ServerConfig(BaseModel):
     enabled: bool = True
     tags: List[str] = Field(default_factory=list)
     display_name: Optional[str] = None
+    generate_skills: bool = False
 
 class RetrievalConfig(BaseModel):
     top_k: int = Field(default=10, ge=1, le=100)
@@ -73,13 +74,59 @@ class ServerHttpConfig(BaseModel):
     api_key: Optional[str] = None
     cors_origins: List[str] = Field(default_factory=lambda: ["*"])
 
+class LLMConfig(BaseModel):
+    """Provider-agnostic LLM configuration.
+
+    See ``docs/design/use-case-synthesis.md`` for the full provider matrix.
+    The ``api_key_env`` field NAMES an environment variable; the provider
+    reads it at construction time via ``os.environ`` and surfaces a clear
+    error if it is missing.
+    """
+
+    provider: Literal["anthropic", "openai-compatible"] = "anthropic"
+    model: str = "claude-sonnet-4-6"
+    api_key_env: str = "ANTHROPIC_API_KEY"
+    base_url: str = ""
+    max_concurrency: int = Field(default=4, ge=1, le=64)
+    request_timeout_seconds: int = Field(default=60, ge=1, le=600)
+    retry_max_attempts: int = Field(default=3, ge=1, le=10)
+    retry_initial_backoff_seconds: float = Field(default=1.0, ge=0.0, le=60.0)
+    cache_system_prompt: bool = True
+
+    @field_validator("base_url")
+    @classmethod
+    def _validate_base_url(cls, v: str, info) -> str:
+        provider = info.data.get("provider")
+        if provider == "openai-compatible" and not v:
+            raise ValueError(
+                "base_url is required when provider is 'openai-compatible'"
+            )
+        return v
+
+
+class SkillGenerationConfig(BaseModel):
+    """Knobs for the use-case mining + skill synthesis pipeline."""
+
+    enabled: bool = False
+    chunk_size: int = Field(default=12, ge=1, le=512)
+    prompt_version: str = "v1"
+    cache_system_prompt: bool = True
+    cluster_threshold: float = Field(default=0.78, ge=0.0, le=1.0)
+    max_synthesis_concurrency: int = Field(default=4, ge=1, le=64)
+    output_dir: str = ".mcp_semantic_gateway"
+    description_min_chars: int = Field(default=50, ge=1, le=10000)
+    description_max_chars: int = Field(default=600, ge=1, le=10000)
+    body_min_chars: int = Field(default=100, ge=1, le=100000)
+    body_max_chars: int = Field(default=8000, ge=1, le=100000)
+
+
 class MCPSemanticGatewayConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="TOOLSEARCH_",
         env_nested_delimiter="__",
         extra="ignore"
     )
-    
+
     servers: Dict[str, ServerConfig] = Field(default_factory=dict)
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
@@ -87,6 +134,10 @@ class MCPSemanticGatewayConfig(BaseSettings):
     index: IndexConfig = Field(default_factory=IndexConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     http: ServerHttpConfig = Field(default_factory=ServerHttpConfig)
+    llm: Optional[LLMConfig] = None
+    skill_generation: SkillGenerationConfig = Field(
+        default_factory=SkillGenerationConfig
+    )
 
     @validator("embedding")
     def validate_embedding(cls, v):
