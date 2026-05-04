@@ -1,10 +1,15 @@
 import os
+import json
 import sqlite3
 import aiosqlite
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, timezone
+
+if TYPE_CHECKING:
+    from mcp_semantic_gateway.ingestion.chunker import ToolChunk
+    from mcp_semantic_gateway.ingestion.use_case_miner import UseCaseRecord
 
 @dataclass
 class ToolRecord:
@@ -63,15 +68,48 @@ class MetadataDB:
                     version INTEGER
                 )
             """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS use_cases (
+                    id TEXT PRIMARY KEY,
+                    server_id TEXT NOT NULL,
+                    source_hash TEXT NOT NULL,
+                    chunk_id TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    linked_tool_names TEXT NOT NULL,
+                    prerequisites TEXT NOT NULL,
+                    confidence REAL NOT NULL,
+                    generated_by TEXT NOT NULL,
+                    generated_at TEXT NOT NULL,
+                    use_case_hash TEXT NOT NULL UNIQUE
+                )
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_use_cases_server "
+                "ON use_cases(server_id)"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_use_cases_source_hash "
+                "ON use_cases(source_hash)"
+            )
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS chunk_cache (
+                    chunk_hash TEXT NOT NULL,
+                    model_id TEXT NOT NULL,
+                    prompt_version TEXT NOT NULL,
+                    server_id TEXT NOT NULL,
+                    chunk_id TEXT NOT NULL,
+                    completed_at TEXT NOT NULL,
+                    PRIMARY KEY (chunk_hash, model_id, prompt_version)
+                )
+            """)
             await db.commit()
 
     async def save_tool(self, tool: ToolRecord):
         async with aiosqlite.connect(self.db_path) as db:
-            import json
             await db.execute("""
                 INSERT OR REPLACE INTO tools (
-                    tool_id, server_id, name, title, description, 
-                    input_schema, output_schema, annotations, 
+                    tool_id, server_id, name, title, description,
+                    input_schema, output_schema, annotations,
                     embedding_text, indexed_at, index_version, item_type
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
@@ -82,3 +120,176 @@ class MetadataDB:
                 tool.embedding_text, tool.indexed_at, tool.index_version, tool.item_type
             ))
             await db.commit()
+
+    # ------------------------------------------------------------------
+    # Use-case persistence (Phase C)
+    # ------------------------------------------------------------------
+
+    async def save_use_case(self, uc: "UseCaseRecord") -> None:
+        """Persist a UseCaseRecord. Uses INSERT OR IGNORE on the
+        UNIQUE(use_case_hash) constraint so duplicates from re-runs are
+        no-ops."""
+
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                INSERT OR IGNORE INTO use_cases (
+                    id, server_id, source_hash, chunk_id, description,
+                    linked_tool_names, prerequisites, confidence,
+                    generated_by, generated_at, use_case_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    uc.id,
+                    uc.server_id,
+                    uc.source_hash,
+                    uc.chunk_id,
+                    uc.description,
+                    json.dumps(list(uc.linked_tool_names)),
+                    json.dumps(list(uc.prerequisites)),
+                    float(uc.confidence),
+                    uc.generated_by,
+                    uc.generated_at.isoformat()
+                    if isinstance(uc.generated_at, datetime)
+                    else str(uc.generated_at),
+                    uc.use_case_hash,
+                ),
+            )
+            await db.commit()
+
+    async def list_use_cases_for_source(
+        self, server_id: str, source_hash: str
+    ) -> List["UseCaseRecord"]:
+        from mcp_semantic_gateway.ingestion.use_case_miner import UseCaseRecord
+
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                SELECT id, server_id, source_hash, chunk_id, description,
+                       linked_tool_names, prerequisites, confidence,
+                       generated_by, generated_at, use_case_hash
+                FROM use_cases
+                WHERE server_id = ? AND source_hash = ?
+                ORDER BY id
+                """,
+                (server_id, source_hash),
+            )
+            rows = await cursor.fetchall()
+
+        return [_row_to_use_case(row, UseCaseRecord) for row in rows]
+
+    async def list_use_cases(self) -> List["UseCaseRecord"]:
+        from mcp_semantic_gateway.ingestion.use_case_miner import UseCaseRecord
+
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                SELECT id, server_id, source_hash, chunk_id, description,
+                       linked_tool_names, prerequisites, confidence,
+                       generated_by, generated_at, use_case_hash
+                FROM use_cases
+                ORDER BY id
+                """
+            )
+            rows = await cursor.fetchall()
+
+        return [_row_to_use_case(row, UseCaseRecord) for row in rows]
+
+    async def use_case_count_for_source(
+        self, server_id: str, source_hash: str
+    ) -> int:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                SELECT COUNT(*) FROM use_cases
+                WHERE server_id = ? AND source_hash = ?
+                """,
+                (server_id, source_hash),
+            )
+            row = await cursor.fetchone()
+        return int(row[0]) if row else 0
+
+    async def is_chunk_cached(
+        self, chunk_hash: str, model_id: str, prompt_version: str
+    ) -> bool:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                SELECT 1 FROM chunk_cache
+                WHERE chunk_hash = ? AND model_id = ? AND prompt_version = ?
+                LIMIT 1
+                """,
+                (chunk_hash, model_id, prompt_version),
+            )
+            row = await cursor.fetchone()
+        return row is not None
+
+    async def mark_chunk_cached(
+        self,
+        chunk: "ToolChunk",
+        model_id: str,
+        prompt_version: str,
+    ) -> None:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                INSERT OR REPLACE INTO chunk_cache (
+                    chunk_hash, model_id, prompt_version,
+                    server_id, chunk_id, completed_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    chunk.chunk_hash,
+                    model_id,
+                    prompt_version,
+                    chunk.server_id,
+                    chunk.chunk_id,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+            await db.commit()
+
+    async def is_source_cached(
+        self, server_id: str, source_hash: str
+    ) -> bool:
+        """Source-level cache: True iff at least one persisted use-case
+        record exists for ``(server_id, source_hash)``.
+
+        Bumping ``prompt_version`` does NOT invalidate this flag — the
+        per-chunk cache table handles that, and any LLM re-execution
+        deduplicates via the ``use_case_hash`` UNIQUE constraint."""
+
+        return (
+            await self.use_case_count_for_source(server_id, source_hash) > 0
+        )
+
+
+def _row_to_use_case(row, UseCaseRecord):
+    """Hydrate a SQLite row into a UseCaseRecord."""
+
+    (
+        id_,
+        server_id,
+        source_hash,
+        chunk_id,
+        description,
+        linked_tool_names_json,
+        prerequisites_json,
+        confidence,
+        generated_by,
+        generated_at_iso,
+        use_case_hash,
+    ) = row
+    return UseCaseRecord(
+        id=id_,
+        server_id=server_id,
+        source_hash=source_hash,
+        chunk_id=chunk_id,
+        description=description,
+        linked_tool_names=json.loads(linked_tool_names_json),
+        prerequisites=json.loads(prerequisites_json),
+        confidence=float(confidence),
+        generated_by=generated_by,
+        generated_at=datetime.fromisoformat(generated_at_iso),
+        use_case_hash=use_case_hash,
+    )
