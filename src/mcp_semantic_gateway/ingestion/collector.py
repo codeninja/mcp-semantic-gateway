@@ -28,8 +28,16 @@ def _parse_skill_md(content: str, skill_file: Path) -> Tuple[str, str, List[str]
             except yaml.YAMLError:
                 front = {}
             if isinstance(front, dict):
-                name = (front.get("name") or skill_file.parent.name).strip()
-                description = (front.get("description") or "").strip()
+                # YAML can legally parse name/description as non-strings
+                # (`name: 123` -> int). Coerce to str before .strip() so a
+                # quirky frontmatter never causes the whole skill to be
+                # skipped.
+                raw_name = front.get("name")
+                name = (str(raw_name) if raw_name is not None else skill_file.parent.name).strip()
+                if not name:
+                    name = skill_file.parent.name
+                raw_desc = front.get("description")
+                description = (str(raw_desc) if raw_desc is not None else "").strip()
                 allowed = front.get("allowed-tools") or []
                 if not isinstance(allowed, list):
                     allowed = []

@@ -259,8 +259,29 @@ def write_package(
     meta_bytes = _render_meta_json(package, validation_passes=validation_passes or [])
     _atomic_write_bytes(v1_dir / ".meta.json", meta_bytes)
 
+    refs_dir = v1_dir / "references"
+    desired_filenames = {ref.filename for ref in package.references}
+
+    # Prune stale reference files from a previous rewrite: anything in
+    # references/ that the new package does NOT declare must be removed.
+    # Keeps disk content == package.references content even when an
+    # idempotent rewrite shrinks or changes the reference set.
+    if refs_dir.exists():
+        for existing in refs_dir.iterdir():
+            if existing.is_file() and existing.name not in desired_filenames:
+                try:
+                    existing.unlink()
+                except OSError:
+                    pass
+        # If the new package has no references at all, drop the empty dir
+        # so collectors never see a phantom references/ folder.
+        if not desired_filenames:
+            try:
+                refs_dir.rmdir()
+            except OSError:
+                pass
+
     if package.references:
-        refs_dir = v1_dir / "references"
         refs_dir.mkdir(parents=True, exist_ok=True)
         for ref in package.references:
             _atomic_write_text(refs_dir / ref.filename, ref.content)

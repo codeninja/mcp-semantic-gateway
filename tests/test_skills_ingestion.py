@@ -90,6 +90,29 @@ async def test_skills_ingestion_parses_yaml_frontmatter(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_skills_ingestion_handles_non_string_yaml_values(tmp_path):
+    """Regression: YAML can legally parse `name: 123` as int. The collector
+    must coerce to str so the whole skill isn't dropped."""
+
+    sd = tmp_path / "weird-skill" / "v1"
+    sd.mkdir(parents=True)
+    (sd / "SKILL.md").write_text(
+        "---\n"
+        "name: 123\n"
+        "description: 456\n"
+        "---\n\nbody text\n"
+    )
+    config = MCPSemanticGatewayConfig(
+        servers={"weird": ServerConfig(type=SourceType.SKILL, path=str(tmp_path), enabled=True)}
+    )
+    items = await Collector(config).collect_all()
+    skills = [i for i in items if i["_item_type"] == "skill"]
+    assert len(skills) == 1
+    assert skills[0]["name"] == "123"
+    assert "456" in skills[0]["description"]
+
+
+@pytest.mark.asyncio
 async def test_skills_ingestion_legacy_fallback(tmp_path):
     """SKILL.md without frontmatter falls back to line-1-as-name."""
 

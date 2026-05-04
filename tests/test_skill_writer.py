@@ -153,6 +153,34 @@ def test_references_dir_absent_when_no_references(tmp_path: Path):
     assert not (v1_dir / "references").exists()
 
 
+def test_rewrite_prunes_stale_references(tmp_path: Path):
+    """Idempotent rewrite must keep references/ in sync with the package's
+    declared content. A reference removed from a later package version is
+    deleted from disk; a removed-entirely set deletes the directory."""
+
+    refs_v1 = [
+        SkillReference(filename="api.md", content="api content text body padding"),
+        SkillReference(filename="examples.md", content="example content text body padding"),
+    ]
+    pkg = _make_package(references=refs_v1)
+    v1_dir = write_package(pkg, project_root=tmp_path)
+    refs_dir = v1_dir / "references"
+    assert (refs_dir / "api.md").is_file()
+    assert (refs_dir / "examples.md").is_file()
+
+    # Rewrite with one reference removed.
+    refs_v2 = [SkillReference(filename="api.md", content="api content text body padding")]
+    pkg_v2 = _make_package(references=refs_v2)
+    write_package(pkg_v2, project_root=tmp_path)
+    assert (refs_dir / "api.md").is_file()
+    assert not (refs_dir / "examples.md").exists()
+
+    # Rewrite with NO references — directory should be removed entirely.
+    pkg_v3 = _make_package()
+    write_package(pkg_v3, project_root=tmp_path)
+    assert not refs_dir.exists()
+
+
 # ---------------------------------------------------------------------------
 # .meta.json
 # ---------------------------------------------------------------------------

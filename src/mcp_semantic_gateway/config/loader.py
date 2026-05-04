@@ -4,8 +4,10 @@ The base config lives at ``~/.mcp_semantic_gateway/config.toml``. Callers
 can layer one or more overlay TOML files on top — the
 ``.env.anthropic``/``.env.openai``/``.env.localllm`` files in this repo
 are TOML overlays that supply just an ``[llm]`` block. Overlays are
-merged top-level by section: a section in an overlay replaces the same
-section in the base; sections only present in the overlay are added.
+**deep-merged**: a key in an overlay overrides the same key in the base,
+but sibling keys in the same section are preserved. So overlaying
+``[llm] model = "x"`` keeps any existing ``[llm] base_url`` from the
+base. Non-dict values (scalars, lists) are replaced wholesale.
 """
 
 from __future__ import annotations

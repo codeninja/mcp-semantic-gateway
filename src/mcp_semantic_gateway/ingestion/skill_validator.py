@@ -25,9 +25,14 @@ Validation passes
     body is procedural prose only).
 
 ``tool-grounding``
-    Every entry in ``tool_dependencies`` and every backticked identifier
-    of length >= 3 in ``body_markdown`` resolves into the harvested tool
-    name set. ``tool_dependencies`` must be non-empty.
+    Every entry in ``tool_dependencies`` must resolve into the harvested
+    tool name set; ``tool_dependencies`` must be non-empty. Body backticks
+    legitimately wrap parameter names (`petId`, `orderId`, ...) so body
+    grounding is intentionally looser: a backticked identifier is flagged
+    only when it is *obviously* tool-shaped — length >= 8 AND contains an
+    underscore. The dominant LLM hallucination path (declared deps that
+    don't exist) is fully covered; short camelCase parameters do not
+    produce false-positive rejections.
 
 ``length-bounds``
     ``body_markdown`` length within configured bounds; each
@@ -128,12 +133,11 @@ class ValidationReport(BaseModel):
 
 _NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]{1,63}$")
 
-# Backticked identifiers in markdown body. The validator treats any
-# backticked identifier of length >= 3 as a candidate tool reference.
-# Real tool names usually clear that bar; common false-positive
-# identifiers (``id``, ``it``) sit just below it.
+# Backticked identifiers in markdown body. Candidates are filtered down
+# to "obviously tool-shaped" names (length >= 8 AND contains an
+# underscore) inside ``_check_tool_grounding`` — the loose pattern here
+# matches any identifier; the heuristic does the real work.
 _TOOL_REF_PATTERN = re.compile(r"`([a-zA-Z_][a-zA-Z0-9_-]*)`")
-_MIN_REFERENCED_NAME_LEN = 3
 
 
 # ---------------------------------------------------------------------------
