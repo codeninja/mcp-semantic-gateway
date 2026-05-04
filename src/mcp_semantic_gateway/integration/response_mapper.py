@@ -186,8 +186,9 @@ def _binary_response(
     headers: httpx.Headers,
     warnings: List[str],
 ) -> ResponseMapping:
-    """Non-image binary: return the payload base64 plus type + key headers so
-    the model knows what it received."""
+    """Non-image binary: surface a short text summary; the base64 payload
+    lives only in ``structuredContent.binary.base64`` so it isn't duplicated
+    (and doesn't bloat token usage on large downloads)."""
 
     metadata = {
         "content_type": actual_ct or "application/octet-stream",
@@ -200,8 +201,9 @@ def _binary_response(
             metadata[h] = v
     payload_b64 = base64.b64encode(body).decode("ascii")
     text = (
-        f"Binary response ({metadata['content_type']}, "
-        f"{metadata['byte_length']} bytes, base64 below):\n{payload_b64}"
+        f"Binary response: {metadata['content_type']}, "
+        f"{metadata['byte_length']} bytes. "
+        "Payload available in structuredContent.binary.base64."
     )
     return ResponseMapping(
         content_blocks=[{"type": "text", "text": text}],

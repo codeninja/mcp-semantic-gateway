@@ -57,6 +57,18 @@ class AuthConfig(BaseModel):
             raise ValueError("env var name must be non-empty")
         return v
 
+    @field_validator("header_name", "query_name")
+    @classmethod
+    def _strip_and_reject_empty_key(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError(
+                "header_name / query_name must be non-empty and non-whitespace"
+            )
+        return stripped
+
     @field_validator("type")
     @classmethod
     def _validate_required_fields(cls, v: AuthType, info) -> AuthType:

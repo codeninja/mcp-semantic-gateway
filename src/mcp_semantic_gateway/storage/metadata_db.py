@@ -11,6 +11,12 @@ if TYPE_CHECKING:
     from mcp_semantic_gateway.ingestion.chunker import ToolChunk
     from mcp_semantic_gateway.ingestion.use_case_miner import UseCaseRecord
 
+
+# Conservative bound-parameter chunk size for ``WHERE tool_id IN (?, ?, ...)``
+# queries. SQLite's default ``SQLITE_MAX_VARIABLE_NUMBER`` was 999 before
+# 3.32 and 32766 since; 500 is safely under both.
+_SQLITE_PARAM_BATCH = 500
+
 @dataclass
 class ToolRecord:
     tool_id: str
@@ -136,25 +142,32 @@ class MetadataDB:
         return [tuple(r) for r in rows]
 
     async def list_tools_by_ids(self, tool_ids: List[str]) -> List[ToolRecord]:
-        """Hydrate many ``ToolRecord``s in a single query.
+        """Hydrate many ``ToolRecord``s in batched bulk queries.
 
         Used by ``ToolRegistry.list_handles`` to avoid the N+1 connection
-        pattern of calling :meth:`get_tool_by_id` in a loop.
+        pattern of calling :meth:`get_tool_by_id` in a loop. Batches IDs
+        under SQLite's bound-parameter limit (default 999 in older SQLite,
+        higher in newer; we cap at a safe 500) so very large registries
+        don't trip ``too many SQL variables``.
         """
 
         if not tool_ids:
             return []
-        placeholders = ",".join("?" for _ in tool_ids)
-        sql = (
-            "SELECT tool_id, server_id, name, title, description, "
-            "input_schema, output_schema, annotations, embedding_text, "
-            "indexed_at, index_version, item_type, route_metadata "
-            f"FROM tools WHERE tool_id IN ({placeholders})"
-        )
+        results: List[ToolRecord] = []
         async with aiosqlite.connect(self.db_path) as db:
-            cursor = await db.execute(sql, tool_ids)
-            rows = await cursor.fetchall()
-        return [_row_to_tool_record(row) for row in rows]
+            for i in range(0, len(tool_ids), _SQLITE_PARAM_BATCH):
+                chunk = tool_ids[i:i + _SQLITE_PARAM_BATCH]
+                placeholders = ",".join("?" for _ in chunk)
+                sql = (
+                    "SELECT tool_id, server_id, name, title, description, "
+                    "input_schema, output_schema, annotations, embedding_text, "
+                    "indexed_at, index_version, item_type, route_metadata "
+                    f"FROM tools WHERE tool_id IN ({placeholders})"
+                )
+                cursor = await db.execute(sql, chunk)
+                rows = await cursor.fetchall()
+                results.extend(_row_to_tool_record(r) for r in rows)
+        return results
 
     async def get_tool_by_id(self, tool_id: str) -> Optional[ToolRecord]:
         """Hydrate a full ``ToolRecord`` from the primary key."""

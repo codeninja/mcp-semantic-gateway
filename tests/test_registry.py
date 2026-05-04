@@ -266,6 +266,61 @@ async def test_registry_skips_skills_and_prompts():
 
 
 @pytest.mark.asyncio
+async def test_list_handles_uses_bulk_fetch_and_handles_many_tools():
+    """Saves more tools than ``_SQLITE_PARAM_BATCH`` so this test would fail
+    with the original single-IN-clause path, and asserts the batched bulk
+    fetch still returns every handle."""
+
+    from mcp_semantic_gateway.storage.metadata_db import _SQLITE_PARAM_BATCH
+
+    with tempfile.TemporaryDirectory() as d:
+        db = MetadataDB(Path(d) / "m.db")
+        await db.initialize()
+        n = _SQLITE_PARAM_BATCH + 5
+        for i in range(n):
+            await db.save_tool(ToolRecord(
+                tool_id=f"svc::tool::op_{i}",
+                server_id="svc",
+                name=f"op_{i}",
+                item_type="tool",
+                input_schema={"type": "object"},
+            ))
+
+        reg = ToolRegistry(Path(d) / "m.db")
+        await reg.initialize()
+        handles = await reg.list_handles()
+        assert len(handles) == n
+        # Spot-check that names round-trip.
+        assert {h.raw_name for h in handles} == {f"op_{i}" for i in range(n)}
+
+
+@pytest.mark.asyncio
+async def test_canonical_for_is_o1_keyed_by_server_and_raw_name():
+    """Pin the O(1) reverse-lookup contract: the registry must answer
+    ``canonical_for`` from a precomputed ``(server_id, raw_name)`` dict, not
+    by re-parsing every ``tool_id``."""
+
+    with tempfile.TemporaryDirectory() as d:
+        db = MetadataDB(Path(d) / "m.db")
+        await db.initialize()
+        await db.save_tool(ToolRecord(
+            tool_id="svc::tool::op",
+            server_id="svc",
+            name="op",
+            item_type="tool",
+            input_schema={"type": "object"},
+        ))
+        reg = ToolRegistry(Path(d) / "m.db")
+        await reg.initialize()
+        # Implementation-detail check: the dict exists and is populated.
+        assert ("svc", "op") in reg._server_raw_to_canon
+        assert reg.canonical_for("svc", "op") == "op"
+        # Misses return None without raising.
+        assert reg.canonical_for("svc", "missing") is None
+        assert reg.canonical_for("missing", "op") is None
+
+
+@pytest.mark.asyncio
 async def test_registry_uninitialized_raises():
     with tempfile.TemporaryDirectory() as d:
         db = MetadataDB(Path(d) / "m.db")

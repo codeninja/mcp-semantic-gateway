@@ -266,6 +266,53 @@ async def test_inline_request_body_lifts_properties():
 
 
 @pytest.mark.asyncio
+async def test_required_inline_body_with_no_required_fields_sends_empty_object():
+    """A required body with an empty ``schema.required`` (e.g. an empty-object
+    contract) still sends ``{}`` rather than dropping the body silently."""
+
+    cap = _Capture()
+    executor = _make_executor(cap.respond(200, {}))
+    handle = _make_handle(
+        method="POST",
+        path="/notify",
+        parameters=[],
+        request_body={
+            "content_type": "application/json",
+            "schema": {"type": "object", "properties": {}, "required": []},
+            "required": True,
+            "input_style": "inline",
+        },
+    )
+    result = await executor.call(handle, {})
+    assert "isError" not in result, result
+    assert json.loads(cap.requests[0].content) == {}
+    assert cap.requests[0].headers.get("content-type", "").startswith("application/json")
+
+
+@pytest.mark.asyncio
+async def test_optional_inline_body_with_no_args_sends_no_body():
+    """When the body is optional and the caller supplies nothing, the
+    executor must NOT spuriously send ``{}`` -- the request goes out with
+    no body at all."""
+
+    cap = _Capture()
+    executor = _make_executor(cap.respond(200, {}))
+    handle = _make_handle(
+        method="POST",
+        path="/optional",
+        parameters=[],
+        request_body={
+            "content_type": "application/json",
+            "schema": {"type": "object", "properties": {"note": {"type": "string"}}},
+            "required": False,
+            "input_style": "inline",
+        },
+    )
+    await executor.call(handle, {})
+    assert cap.requests[0].content == b""
+
+
+@pytest.mark.asyncio
 async def test_wrapped_request_body_uses_requestBody_key():
     cap = _Capture()
     executor = _make_executor(cap.respond(200, {}))
@@ -532,6 +579,14 @@ async def test_other_binary_returns_payload_with_metadata():
     ])
     result = await executor.call(handle, {"id": "x"})
     assert result["content"][0]["type"] == "text"
+    text = result["content"][0]["text"]
+    # The base64 payload must NOT be duplicated in the text block (token bloat
+    # on large downloads); the text is a short summary and points at
+    # ``structuredContent.binary.base64`` for the actual bytes.
+    payload_b64 = base64.b64encode(pdf_bytes).decode("ascii")
+    assert payload_b64 not in text
+    assert "application/pdf" in text
+    assert str(len(pdf_bytes)) in text
     sc = result["structuredContent"]
     assert sc["binary"]["content_type"] == "application/pdf"
     assert sc["binary"]["byte_length"] == len(pdf_bytes)
@@ -651,6 +706,39 @@ async def test_timeout_returns_isError():
 # ---------------------------------------------------------------------------
 # Programming-error guards
 # ---------------------------------------------------------------------------
+
+
+def test_auth_config_rejects_whitespace_only_header_name():
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    with _pytest.raises(ValidationError):
+        AuthConfig(
+            type=AuthType.API_KEY,
+            header_name="   ",
+            api_key_env="K",
+        )
+
+
+def test_auth_config_rejects_whitespace_only_query_name():
+    import pytest as _pytest
+    from pydantic import ValidationError
+
+    with _pytest.raises(ValidationError):
+        AuthConfig(
+            type=AuthType.API_KEY,
+            query_name="\t",
+            api_key_env="K",
+        )
+
+
+def test_auth_config_strips_header_name_whitespace():
+    cfg = AuthConfig(
+        type=AuthType.API_KEY,
+        header_name="  X-API-Key  ",
+        api_key_env="K",
+    )
+    assert cfg.header_name == "X-API-Key"
 
 
 @pytest.mark.asyncio

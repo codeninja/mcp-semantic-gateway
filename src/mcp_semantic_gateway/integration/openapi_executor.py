@@ -286,7 +286,16 @@ def _split_arguments(
         if body_meta.get("input_style") == "wrapped":
             body = arguments.get("requestBody")
         else:
-            body = {k: arguments[k] for k in body_keys if k in arguments} or None
+            collected = {k: arguments[k] for k in body_keys if k in arguments}
+            # If the spec marks the body required but the schema declares
+            # no required fields (e.g. an empty-object body), still send an
+            # empty ``{}`` rather than dropping the body entirely.
+            if collected:
+                body = collected
+            elif body_meta.get("required"):
+                body = {}
+            else:
+                body = None
 
     for name, value in arguments.items():
         loc = by_location.get(name)
