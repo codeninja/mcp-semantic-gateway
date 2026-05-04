@@ -56,7 +56,12 @@ class OpenAICompatibleProvider:
     ) -> LLMResponse:
         kwargs: dict[str, Any] = {
             "model": self.model_id,
-            "max_tokens": max_tokens,
+            # GPT-5+ and other reasoning models reject `max_tokens` and require
+            # `max_completion_tokens` instead. The new parameter is also
+            # accepted by GPT-4o, GPT-4.1, OpenRouter, and recent local
+            # runtimes (Ollama, llama.cpp, vLLM). If a server rejects it we
+            # transparently retry with the legacy name.
+            "max_completion_tokens": max_tokens,
             "temperature": temperature,
             "messages": [
                 {"role": m.role, "content": m.content} for m in messages
@@ -94,6 +99,21 @@ class OpenAICompatibleProvider:
                 return await self._client.chat.completions.create(**kwargs)
             except openai.RateLimitError as exc:
                 last_exc = exc
+            except openai.BadRequestError as exc:
+                # Some servers (older OpenAI, some Ollama versions) only
+                # accept the legacy `max_tokens` parameter. Translate once.
+                msg = str(exc)
+                if "max_completion_tokens" in msg and "max_completion_tokens" in kwargs:
+                    kwargs = dict(kwargs)
+                    kwargs["max_tokens"] = kwargs.pop("max_completion_tokens")
+                    last_exc = exc
+                    continue  # retry immediately, no backoff
+                if "max_tokens" in msg and "max_tokens" in kwargs:
+                    kwargs = dict(kwargs)
+                    kwargs["max_completion_tokens"] = kwargs.pop("max_tokens")
+                    last_exc = exc
+                    continue
+                raise
             except openai.APIStatusError as exc:
                 status = getattr(exc, "status_code", None)
                 if status is None or status < 500:
