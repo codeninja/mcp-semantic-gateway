@@ -71,7 +71,24 @@ class MCPSemanticGatewayProxy:
         reader = asyncio.StreamReader()
         protocol = asyncio.StreamReaderProtocol(reader)
         await asyncio.get_event_loop().connect_read_pipe(lambda: protocol, sys.stdin)
+        try:
+            await self._read_loop(reader)
+        finally:
+            await self._shutdown()
 
+    async def _shutdown(self) -> None:
+        """Release the executor's HTTP client and stop any child MCP processes
+        so we don't leak resources when stdin closes."""
+
+        await self.openapi_executor.aclose()
+        for client in self.clients.values():
+            try:
+                await client.stop()
+            except Exception:
+                # Best effort: continue stopping the rest even if one hangs.
+                pass
+
+    async def _read_loop(self, reader: asyncio.StreamReader) -> None:
         while True:
             line = await reader.readline()
             if not line: break

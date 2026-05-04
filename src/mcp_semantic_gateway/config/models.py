@@ -96,7 +96,8 @@ class ServerConfig(BaseModel):
     # Outbound auth for OpenAPI sources. Ignored for other source types.
     auth: Optional[AuthConfig] = None
     # Optional override for the upstream base URL. If absent, the executor
-    # falls back to the operation/spec ``servers`` block, then to the spec URL.
+    # uses the operation/spec ``servers`` block and surfaces an error if
+    # neither is set.
     base_url: Optional[str] = None
 
 class RetrievalConfig(BaseModel):

@@ -3,7 +3,7 @@ from mcp_semantic_gateway.config.loader import load_config
 from mcp_semantic_gateway.config.models import MCPSemanticGatewayConfig
 from mcp_semantic_gateway.storage.metadata_db import MetadataDB, ToolRecord
 from mcp_semantic_gateway.storage.vector_store import VectorStore
-from mcp_semantic_gateway.ingestion.collector import MCPClient, Collector
+from mcp_semantic_gateway.ingestion.collector import Collector
 from mcp_semantic_gateway.ingestion.embedder import LocalEmbedder, build_embedding_text
 import asyncio
 from datetime import datetime

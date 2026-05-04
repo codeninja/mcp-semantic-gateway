@@ -108,7 +108,7 @@ def canonicalize_names(
             n = n[:MAX_TOOL_NAME]
         tentative[(sid, name)] = n
 
-    # Pass 3: resolve post-clamp collisions with deterministic ``-N`` suffix.
+    # Pass 3: resolve post-clamp collisions with deterministic ``.N`` suffix.
     by_canon: Dict[str, List[Tuple[str, str]]] = defaultdict(list)
     for k, v in tentative.items():
         by_canon[v].append(k)
@@ -143,6 +143,9 @@ class ToolRegistry:
         self._canon_to_tool_id: Dict[str, str] = {}
         self._raw_to_tool_ids: Dict[str, List[str]] = defaultdict(list)
         self._tool_id_to_canon: Dict[str, str] = {}
+        # ``(server_id, raw_name) -> canonical`` for O(1) reverse lookup.
+        # Used by SearchCore to rewrite ``tools/list`` names per row.
+        self._server_raw_to_canon: Dict[Tuple[str, str], str] = {}
         self._initialized = False
 
     async def initialize(self) -> None:
@@ -157,12 +160,14 @@ class ToolRegistry:
         self._canon_to_tool_id.clear()
         self._raw_to_tool_ids.clear()
         self._tool_id_to_canon.clear()
+        self._server_raw_to_canon.clear()
 
         for tool_id, server_id, name, _item_type in tool_rows:
             canon = canonical[(server_id, name)]
             self._canon_to_tool_id[canon] = tool_id
             self._tool_id_to_canon[tool_id] = canon
             self._raw_to_tool_ids[name].append(tool_id)
+            self._server_raw_to_canon[(server_id, name)] = canon
 
         self._initialized = True
 
@@ -191,27 +196,31 @@ class ToolRegistry:
         return _record_to_handle(record, self._tool_id_to_canon[tool_id])
 
     async def list_handles(self) -> List[ToolHandle]:
-        """Hydrate every executable tool, with canonical names applied."""
+        """Hydrate every executable tool, with canonical names applied.
+
+        Performs a single bulk DB query so listing N tools costs O(1)
+        connections instead of N.
+        """
 
         self._ensure_initialized()
-        handles: List[ToolHandle] = []
-        for tool_id, canon in self._tool_id_to_canon.items():
-            record = await self.db.get_tool_by_id(tool_id)
-            if record is None:
-                continue
-            handles.append(_record_to_handle(record, canon))
-        return handles
+        tool_ids = list(self._tool_id_to_canon.keys())
+        records = await self.db.list_tools_by_ids(tool_ids)
+        return [
+            _record_to_handle(r, self._tool_id_to_canon[r.tool_id])
+            for r in records
+            if r.tool_id in self._tool_id_to_canon
+        ]
 
     def canonical_for(self, server_id: str, raw_name: str) -> Optional[str]:
-        """Synchronous reverse lookup, primarily for tests."""
+        """Synchronous reverse lookup keyed by ``(server_id, raw_name)``.
+
+        Hot path: called once per row by ``SearchCore`` when rewriting
+        names in ``tools/list``. Backed by an O(1) dict built in
+        :meth:`initialize`.
+        """
 
         self._ensure_initialized()
-        for tool_id, canon in self._tool_id_to_canon.items():
-            # tool_id format: "{server_id}::{item_type}::{raw_name}"
-            parts = tool_id.split("::", 2)
-            if len(parts) == 3 and parts[0] == server_id and parts[2] == raw_name:
-                return canon
-        return None
+        return self._server_raw_to_canon.get((server_id, raw_name))
 
 
 def _record_to_handle(record: ToolRecord, canonical_name: str) -> ToolHandle:

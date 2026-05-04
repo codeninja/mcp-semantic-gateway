@@ -135,6 +135,27 @@ class MetadataDB:
             rows = await cursor.fetchall()
         return [tuple(r) for r in rows]
 
+    async def list_tools_by_ids(self, tool_ids: List[str]) -> List[ToolRecord]:
+        """Hydrate many ``ToolRecord``s in a single query.
+
+        Used by ``ToolRegistry.list_handles`` to avoid the N+1 connection
+        pattern of calling :meth:`get_tool_by_id` in a loop.
+        """
+
+        if not tool_ids:
+            return []
+        placeholders = ",".join("?" for _ in tool_ids)
+        sql = (
+            "SELECT tool_id, server_id, name, title, description, "
+            "input_schema, output_schema, annotations, embedding_text, "
+            "indexed_at, index_version, item_type, route_metadata "
+            f"FROM tools WHERE tool_id IN ({placeholders})"
+        )
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(sql, tool_ids)
+            rows = await cursor.fetchall()
+        return [_row_to_tool_record(row) for row in rows]
+
     async def get_tool_by_id(self, tool_id: str) -> Optional[ToolRecord]:
         """Hydrate a full ``ToolRecord`` from the primary key."""
 
@@ -153,21 +174,7 @@ class MetadataDB:
             row = await cursor.fetchone()
         if not row:
             return None
-        return ToolRecord(
-            tool_id=row[0],
-            server_id=row[1],
-            name=row[2],
-            title=row[3],
-            description=row[4],
-            input_schema=json.loads(row[5]) if row[5] else None,
-            output_schema=json.loads(row[6]) if row[6] else None,
-            annotations=json.loads(row[7]) if row[7] else None,
-            embedding_text=row[8] or "",
-            indexed_at=row[9] or "",
-            index_version=int(row[10]) if row[10] is not None else 0,
-            item_type=row[11] or "tool",
-            route_metadata=json.loads(row[12]) if row[12] else None,
-        )
+        return _row_to_tool_record(row)
 
     async def save_tool(self, tool: ToolRecord):
         async with aiosqlite.connect(self.db_path) as db:
@@ -329,6 +336,29 @@ class MetadataDB:
         return (
             await self.use_case_count_for_source(server_id, source_hash) > 0
         )
+
+
+def _row_to_tool_record(row) -> ToolRecord:
+    """Hydrate a SQLite row into a ``ToolRecord``. Column order must match
+    the SELECT clauses in :meth:`MetadataDB.get_tool_by_id` and
+    :meth:`MetadataDB.list_tools_by_ids`.
+    """
+
+    return ToolRecord(
+        tool_id=row[0],
+        server_id=row[1],
+        name=row[2],
+        title=row[3],
+        description=row[4],
+        input_schema=json.loads(row[5]) if row[5] else None,
+        output_schema=json.loads(row[6]) if row[6] else None,
+        annotations=json.loads(row[7]) if row[7] else None,
+        embedding_text=row[8] or "",
+        indexed_at=row[9] or "",
+        index_version=int(row[10]) if row[10] is not None else 0,
+        item_type=row[11] or "tool",
+        route_metadata=json.loads(row[12]) if row[12] else None,
+    )
 
 
 def _row_to_use_case(row, UseCaseRecord):

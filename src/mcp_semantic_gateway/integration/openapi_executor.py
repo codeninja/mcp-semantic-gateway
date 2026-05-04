@@ -278,7 +278,10 @@ def _split_arguments(
     for p in route.get("parameters") or []:
         by_location[p["name"]] = p["in"]
 
-    body: Optional[Dict[str, Any]] = None
+    # ``body`` is intentionally ``Optional[Any]``: in wrapped-body mode the
+    # caller can pass any JSON-serializable value (object, array, scalar)
+    # under the ``requestBody`` key.
+    body: Optional[Any] = None
     if body_meta:
         if body_meta.get("input_style") == "wrapped":
             body = arguments.get("requestBody")
