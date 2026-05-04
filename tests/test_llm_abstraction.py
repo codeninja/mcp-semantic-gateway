@@ -360,6 +360,79 @@ async def test_openai_function_calling_and_tool_choice(
 
 
 @pytest.mark.asyncio
+async def test_openai_falls_back_to_max_tokens_when_param_rejected(
+    monkeypatch: pytest.MonkeyPatch, openai_config: LLMConfig
+) -> None:
+    """Older OpenAI-compatible servers reject ``max_completion_tokens``.
+    The adapter should swap to legacy ``max_tokens`` and retry once.
+    Mirrors the live regression with GPT-5.x that prompted the fix in
+    reverse, but pinning the reverse fallback path."""
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    _patch_openai(monkeypatch)
+
+    import openai
+
+    class _FakeBadRequest(openai.BadRequestError):
+        # Bypass the real __init__ which requires an httpx.Response. We
+        # only need the str() to contain the parameter name the adapter
+        # checks for.
+        def __init__(self, message: str) -> None:  # noqa: D401
+            BaseException.__init__(self, message)
+            self.status_code = 400
+
+        def __str__(self) -> str:  # noqa: D401
+            return BaseException.__str__(self)
+
+    class FailingThenSucceedingCompletions:
+        def __init__(self, parent: Any) -> None:
+            self._parent = parent
+            self._calls = 0
+
+        async def create(self, **kwargs: Any) -> Any:
+            self._calls += 1
+            self._parent.last_kwargs = kwargs
+            if self._calls == 1:
+                raise _FakeBadRequest(
+                    "Unsupported parameter: 'max_completion_tokens' is not "
+                    "supported with this model. Use 'max_tokens' instead."
+                )
+            return self._parent.canned_response
+
+    class FakeChat:
+        def __init__(self, parent: Any) -> None:
+            self.completions = FailingThenSucceedingCompletions(parent)
+
+    class FakeClient:
+        def __init__(self, **kwargs: Any) -> None:
+            self.last_kwargs: Any = None
+            self.canned_response = SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        finish_reason="stop",
+                        message=SimpleNamespace(content="ok", tool_calls=None),
+                    )
+                ],
+                usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+            )
+            self.chat = FakeChat(self)
+
+    monkeypatch.setattr(openai, "AsyncOpenAI", FakeClient)
+
+    provider = OpenAICompatibleProvider(openai_config)
+    response = await provider.call(
+        [Message(role="user", content="hello")],
+        max_tokens=128,
+    )
+    # Adapter must have completed despite the first BadRequest.
+    assert response.text == "ok"
+    # The eventually-successful kwargs must use the legacy parameter.
+    fake_client: Any = provider._client
+    assert "max_tokens" in fake_client.last_kwargs
+    assert "max_completion_tokens" not in fake_client.last_kwargs
+
+
+@pytest.mark.asyncio
 async def test_openai_local_runtime_placeholder_key(
     monkeypatch: pytest.MonkeyPatch, openai_config: LLMConfig
 ) -> None:

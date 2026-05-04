@@ -254,6 +254,33 @@ def test_hallucinated_tool_in_body_backticks_fails_tool_grounding() -> None:
     assert failure.details["unresolved"] == ["github_invent_tool"]
 
 
+def test_parameter_names_in_body_do_not_fail_grounding() -> None:
+    """Regression: short camelCase parameter names like ``petId`` must NOT
+    be flagged as hallucinated tools. They legitimately appear in skill
+    bodies. The body-grounding rule was loosened to skip identifiers
+    shorter than 8 chars or without an underscore."""
+
+    body = (
+        VALID_BODY
+        + "\n\nLook up the pet by `petId`, then check `orderId` for fulfillment.\n"
+        "Pass `apiKey` in the request header. Use `tag` to filter results.\n"
+    )
+    package = make_valid_package(body_markdown=body)
+
+    report = validate_skill(package, HARVESTED_TOOLS)
+    assert report.passed is True
+
+
+def test_short_underscore_identifiers_in_body_do_not_fail() -> None:
+    """Identifiers shorter than 8 chars don't trip the body grounding
+    heuristic even with an underscore (e.g., ``next_id``)."""
+
+    body = VALID_BODY + "\n\nIterate through `next_id` until done.\n"
+    package = make_valid_package(body_markdown=body)
+    report = validate_skill(package, HARVESTED_TOOLS)
+    assert report.passed is True
+
+
 # ---------------------------------------------------------------------------
 # 5. reference length bounds
 # ---------------------------------------------------------------------------

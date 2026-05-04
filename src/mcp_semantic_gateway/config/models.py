@@ -110,7 +110,6 @@ class SkillGenerationConfig(BaseModel):
     enabled: bool = False
     chunk_size: int = Field(default=12, ge=1, le=512)
     prompt_version: str = "v1"
-    cache_system_prompt: bool = True
     cluster_threshold: float = Field(default=0.78, ge=0.0, le=1.0)
     max_synthesis_concurrency: int = Field(default=4, ge=1, le=64)
     output_dir: str = ".mcp_semantic_gateway"
