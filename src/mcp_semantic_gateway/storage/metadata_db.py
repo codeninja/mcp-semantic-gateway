@@ -25,6 +25,10 @@ class ToolRecord:
     indexed_at: str = ""
     index_version: int = 0
     item_type: str = "tool"
+    # Structured execution metadata for OpenAPI-sourced tools (method, path,
+    # parameter locations, body schema, security, server overrides). NULL for
+    # native MCP tools, skills, or prompts.
+    route_metadata: Optional[dict] = None
 
 class MetadataDB:
     def __init__(self, db_path: Path):
@@ -59,9 +63,23 @@ class MetadataDB:
                     indexed_at TEXT,
                     index_version INTEGER,
                     item_type TEXT DEFAULT 'tool',
+                    route_metadata TEXT,
                     FOREIGN KEY(server_id) REFERENCES servers(server_id)
                 )
             """)
+            # Migrate older databases that predate route_metadata.
+            cursor = await db.execute("PRAGMA table_info(tools)")
+            existing_cols = {row[1] for row in await cursor.fetchall()}
+            if "route_metadata" not in existing_cols:
+                await db.execute("ALTER TABLE tools ADD COLUMN route_metadata TEXT")
+            # Lookup index for the executor's tool_name -> route_metadata path.
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tools_name ON tools(name)"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tools_server_name "
+                "ON tools(server_id, name)"
+            )
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS index_versions (
                     server_id TEXT PRIMARY KEY,
@@ -104,20 +122,69 @@ class MetadataDB:
             """)
             await db.commit()
 
+    async def list_tool_summaries(self) -> List[tuple]:
+        """Return ``(tool_id, server_id, name, item_type)`` for every row in
+        ``tools``. Used by the registry to compute canonical names in memory.
+        """
+
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT tool_id, server_id, name, item_type FROM tools "
+                "ORDER BY server_id, name"
+            )
+            rows = await cursor.fetchall()
+        return [tuple(r) for r in rows]
+
+    async def get_tool_by_id(self, tool_id: str) -> Optional[ToolRecord]:
+        """Hydrate a full ``ToolRecord`` from the primary key."""
+
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                SELECT tool_id, server_id, name, title, description,
+                       input_schema, output_schema, annotations,
+                       embedding_text, indexed_at, index_version, item_type,
+                       route_metadata
+                FROM tools
+                WHERE tool_id = ?
+                """,
+                (tool_id,),
+            )
+            row = await cursor.fetchone()
+        if not row:
+            return None
+        return ToolRecord(
+            tool_id=row[0],
+            server_id=row[1],
+            name=row[2],
+            title=row[3],
+            description=row[4],
+            input_schema=json.loads(row[5]) if row[5] else None,
+            output_schema=json.loads(row[6]) if row[6] else None,
+            annotations=json.loads(row[7]) if row[7] else None,
+            embedding_text=row[8] or "",
+            indexed_at=row[9] or "",
+            index_version=int(row[10]) if row[10] is not None else 0,
+            item_type=row[11] or "tool",
+            route_metadata=json.loads(row[12]) if row[12] else None,
+        )
+
     async def save_tool(self, tool: ToolRecord):
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("""
                 INSERT OR REPLACE INTO tools (
                     tool_id, server_id, name, title, description,
                     input_schema, output_schema, annotations,
-                    embedding_text, indexed_at, index_version, item_type
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    embedding_text, indexed_at, index_version, item_type,
+                    route_metadata
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 tool.tool_id, tool.server_id, tool.name, tool.title, tool.description,
                 json.dumps(tool.input_schema) if tool.input_schema else None,
                 json.dumps(tool.output_schema) if tool.output_schema else None,
                 json.dumps(tool.annotations) if tool.annotations else None,
-                tool.embedding_text, tool.indexed_at, tool.index_version, tool.item_type
+                tool.embedding_text, tool.indexed_at, tool.index_version, tool.item_type,
+                json.dumps(tool.route_metadata) if tool.route_metadata else None,
             ))
             await db.commit()
 

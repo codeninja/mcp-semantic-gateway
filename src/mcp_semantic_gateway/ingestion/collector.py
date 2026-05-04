@@ -126,6 +126,35 @@ class MCPClient:
                 pass
         return tools
 
+    async def call_tool(self, name: str, arguments: dict, *, request_id: int = 1000) -> dict:
+        """Forward a single ``tools/call`` to the upstream MCP server and
+        return its raw JSON-RPC ``result`` (or ``error``) payload.
+
+        This replaces the prior broadcast-to-all-clients behavior. Note that
+        we do not yet pipeline concurrent calls on the same client; a future
+        improvement would multiplex on request id.
+        """
+
+        if not self.process or not self.process.stdin or not self.process.stdout:
+            raise RuntimeError("Server not started")
+
+        req = {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "tools/call",
+            "params": {"name": name, "arguments": arguments},
+        }
+        self.process.stdin.write((json.dumps(req) + "\n").encode())
+        await self.process.stdin.drain()
+
+        while True:
+            line = await self.process.stdout.readline()
+            if not line:
+                raise RuntimeError(f"Upstream MCP server {self.server_id!r} closed stdout")
+            resp = json.loads(line)
+            if resp.get("id") == request_id:
+                return resp
+
     async def call_prompts_list(self) -> List[dict]:
         if not self.process or not self.process.stdin or not self.process.stdout:
             raise RuntimeError("Server not started")
