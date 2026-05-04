@@ -26,10 +26,20 @@ class VectorStore:
     def knn_query(self, query_vector: List[float], k: int = 10) -> Tuple[List[int], List[float]]:
         # Handle uninitialized index
         try:
-            if self.index.element_count == 0:
+            n = self.index.element_count
+            if n == 0:
                 return [], []
         except Exception:
             return [], []
-            
+
+        k = min(k, n)
+        if k <= 0:
+            return [], []
+        # hnswlib requires ef >= k. Default ef is small; raise it for the
+        # query so larger k values do not throw.
+        try:
+            self.index.set_ef(max(k, 16))
+        except Exception:
+            pass
         labels, distances = self.index.knn_query(np.array(query_vector), k=k)
         return labels[0].tolist(), distances[0].tolist()

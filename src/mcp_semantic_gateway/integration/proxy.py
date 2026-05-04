@@ -1,4 +1,5 @@
 from mcp_semantic_gateway.config.loader import load_config
+from mcp_semantic_gateway.config.models import SourceType
 from mcp_semantic_gateway.storage.init import initialize_data_dir
 from mcp_semantic_gateway.retrieval.core import SearchCore
 from mcp_semantic_gateway.ingestion.collector import MCPClient
@@ -16,10 +17,17 @@ class MCPSemanticGatewayProxy:
 
     async def start(self):
         for server_id, server_config in self.config.servers.items():
-            if server_config.enabled:
-                client = MCPClient(server_id, server_config)
-                await client.start()
-                self.clients[server_id] = client
+            # Only start child processes for stdio MCP servers. OpenAPI and
+            # Skill sources are static and need no live process.
+            if not server_config.enabled:
+                continue
+            if server_config.type != SourceType.MCP:
+                continue
+            if not server_config.command:
+                continue
+            client = MCPClient(server_id, server_config)
+            await client.start()
+            self.clients[server_id] = client
 
     async def run(self):
         await self.start()
