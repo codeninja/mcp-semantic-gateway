@@ -30,6 +30,9 @@ dependencies = [
 ]
 
 
+[project.scripts]
+mcp-semantic-gateway = "mcp_semantic_gateway.cli.main:app"
+
 [build-system]
 requires = ["uv_build>=0.8.23,<0.9.0"]
 build-backend = "uv_build"
