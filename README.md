@@ -128,7 +128,36 @@ MCP Semantic Gateway operates as a **Statistical Filtering Proxy**. It doesn't j
     *   It performs a sub-millisecond k-NN search and returns only the top-k matches.
     *   `tools/call` requests are transparently routed back to the correct upstream server.
 
-**Deep Dive**: For a full breakdown of the layered architecture, domain models, and state machines, see our [Full Technical Specification](docs/specs/SPEC.md).
+### How the Use-Case & Skill Engine Works
+
+Naked tool descriptions are great for `findPetsByStatus`-style queries but terrible at workflow intent ("clean up old orders"). Opt a source into `generate_skills = true` and the gateway runs an offline **synthesis pipeline** that turns harvested tools into discoverable, agent-readable workflows. The pipeline is invoked with `mcp-semantic-gateway synth` and works in five stages:
+
+```
+harvest ──► chunk ──► mine use cases ──► cluster ──► synthesize skills
+                                              │
+                                              ▼
+                       .mcp_semantic_gateway/skills/<server>/<src_hash>/<id>/v1/
+                                              │
+                                       (next index pass)
+                                              ▼
+                                    semantic vector store
+```
+
+1.  **Chunking** (`ingestion/chunker.py`) — Harvested tools are grouped to fit an LLM call cleanly. OpenAPI sources prefer operation `tags` (decision U-4), then path-prefix (`/users/...`), then ordered fixed-size. Live MCP sources prefer shared name-prefixes (`gh_`, `slack_`). Each chunk gets a deterministic `chunk_id` and `chunk_hash` so re-runs are byte-stable.
+2.  **Use-case mining** (`ingestion/use_case_miner.py`) — One LLM call per chunk via the provider abstraction in `llm/` (Anthropic native or OpenAI-compatible: OpenAI, OpenRouter, Gemini, Ollama, vLLM). Structured output is forced through a single `emit_use_cases` tool — no JSON repair, no freeform parsing. Each emitted record is then **deterministically validated**: description length 50–400 chars, every `linked_tool_names` entry must resolve in the chunk, confidence in `[0, 1]`. Hallucinated tool names are dropped before they reach disk and emitted as `record_rejected` events.
+3.  **Caching** (decision U-7) — Cache key is `(server_id, source_hash, chunk_hash, model_id, prompt_version)`. A re-run on unchanged inputs makes **zero LLM calls**. Bumping `prompt_version` invalidates per-chunk cache; bumping the source bumps everything downstream. Use cases land in a dedicated `use_cases` SQLite table for richer provenance.
+4.  **Clustering** (`ingestion/skill_clusterer.py`) — Use-case descriptions are embedded with the same `LocalEmbedder` the index already uses, then greedy-agglomerative-clustered by cosine similarity (default threshold `0.78`). Each cluster's medoid description becomes its representative; `cluster_hash` is sha256 of sorted member hashes.
+5.  **Skill synthesis** (`ingestion/skill_synthesizer.py`) — One LLM call per cluster via a forced `emit_skill_package` tool. The output is a structured `SkillPackage`: `name`, `description`, `body_markdown`, `tool_dependencies`, optional `references`. Three deterministic passes gate publication (`ingestion/skill_validator.py`):
+    *   **spec-conformance**: name matches `^[a-z][a-z0-9-]{1,63}$`; description in length bounds.
+    *   **tool-grounding**: every name in `tool_dependencies` resolves in the harvested catalog (the dominant LLM hallucination path); body backticks are advisory and only flag obvious tool shapes (length ≥ 8 + underscore) so parameter names like `petId` aren't false-positives.
+    *   **length-bounds**: body and per-reference lengths in range.
+6.  **Atomic write** (`ingestion/skill_writer.py`) — Skills land at `.mcp_semantic_gateway/skills/<server_id>/<source_hash[:12]>/<skill-id>/v1/SKILL.md` (agent-skills-spec-conformant frontmatter + procedural body) plus a `.meta.json` sidecar. Writes go through `tmp + os.replace` so a half-written file can never be observed by the collector. Same `cluster_hash` → idempotent rewrite at the same slot; different cluster → numeric-suffix collision (`<id>-2`, `<id>-3`).
+
+The `Collector.collect_skills()` path discovers the generated `SKILL.md` files on the next `mcp-semantic-gateway index` pass — no retrieval-side changes required. From the agent's perspective, generated skills look identical to hand-authored ones in the vector store, but they're keyed on workflow intent ("triage stale issues", "onboard a pet") rather than mechanical tool names.
+
+**Observability** (`ingestion/observability.py`) — Every stage emits a structured event to `~/.mcp_semantic_gateway/logs/synthesis.jsonl`. Failures and rejected records produce per-chunk diagnostics under `.mcp_semantic_gateway/diagnostics/synthesis/<run_id>/`. The CLI prints a Rich-rendered run summary with token counts, cache hits, rejection breakdowns, and per-source cost (when the provider reports it).
+
+**Deep Dive**: full design lives in [docs/design/use-case-synthesis.md](docs/design/use-case-synthesis.md) and [docs/design/skill-generation.md](docs/design/skill-generation.md). For the layered architecture, domain models, and state machines, see the [Full Technical Specification](docs/specs/SPEC.md).
 
 ---
 
