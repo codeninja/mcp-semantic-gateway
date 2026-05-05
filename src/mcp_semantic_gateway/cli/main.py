@@ -2,9 +2,11 @@ import typer
 from typing import Optional
 from mcp_semantic_gateway import __version__
 from mcp_semantic_gateway.cli.synth import synth_app
+from mcp_semantic_gateway.cli.onboard import onboard as onboard_cmd
 
 app = typer.Typer(name="mcp-semantic-gateway", help="Semantic Tool Discovery Middleware for MCP")
 app.add_typer(synth_app, name="synth")
+app.command("onboard")(onboard_cmd)
 
 def version_callback(value: bool):
     if value:

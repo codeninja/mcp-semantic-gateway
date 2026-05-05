@@ -150,6 +150,58 @@ tools waiting in the wings, ready to be summoned by intent.
 
 ---
 
+## Onboard your coding agent (one command)
+
+Beyond raw MCP wiring, the gateway ships a library of agent-skills-spec
+`SKILL.md` packages that teach a coding agent *how to use this thing* —
+configure sources, query semantically, generate skills, contribute back.
+A single CLI lays them down in the directory your agent already discovers
+on startup:
+
+```bash
+mcp-semantic-gateway onboard claude     # → ~/.claude/skills/
+mcp-semantic-gateway onboard codex      # → ~/.agents/skills/
+mcp-semantic-gateway onboard opencode   # → ~/.config/opencode/skills/
+mcp-semantic-gateway onboard pi         # → ~/.pi/agent/skills/
+```
+
+Two collections ship in the wheel:
+
+- **`consumer`** — for agents that *use* the gateway. Getting started,
+  configuring sources, the search-before-guess discovery pattern, and the
+  skill synthesis pipeline.
+- **`development`** — for agents (or humans) *contributing* to the
+  gateway repo. Local setup, test layout, release process, and the
+  recipe for adding a new source type.
+
+By default both collections are installed. Filter with `--include`:
+
+```bash
+mcp-semantic-gateway onboard claude --include consumer       # end users
+mcp-semantic-gateway onboard claude --include development    # contributors
+```
+
+Project-level (commit alongside your repo, not at $HOME):
+
+```bash
+mcp-semantic-gateway onboard codex --project   # writes to ./.agents/skills/
+```
+
+Other flags:
+
+| Flag | What it does |
+|---|---|
+| `--dry-run` | Print the plan; write nothing. |
+| `--force` / `-f` | Overwrite existing skill directories of the same name. |
+| `--target <dir>` | Override the destination root entirely. |
+| `--list-providers` | Show every supported agent + the path it writes to. |
+| `--list-skills` | Show every bundled `SKILL.md` (collection + description). |
+
+Running `onboard claude` twice without `--force` is a safe no-op — existing
+skill directories are preserved and reported as `skipped`.
+
+---
+
 ## See it in action: the Petstore demo
 
 The repo ships with a full end-to-end showcase under [`examples/petstore_chat/`](examples/petstore_chat/):
@@ -250,6 +302,7 @@ Full design notes live in
 | `mcp-semantic-gateway synth` | Mine use cases + cluster + synthesize `SKILL.md` packages for opted-in OpenAPI sources. |
 | `mcp-semantic-gateway synth status` | Show last-run summary, cache hits, token spend, rejections. |
 | `mcp-semantic-gateway synth init-skill-source` | Register generated skills as a `type = "skill"` source in your config. |
+| `mcp-semantic-gateway onboard <agent>` | Install bundled `SKILL.md` packages into a coding agent's skills dir (`claude`, `codex`, `opencode`, `pi`). |
 
 ---
 
