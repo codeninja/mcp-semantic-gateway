@@ -213,6 +213,8 @@ def _check_auth_env_vars(report: DoctorReport, config: MCPSemanticGatewayConfig)
     for server_id, sc in config.servers.items():
         if sc.type != SourceType.OPENAPI or sc.auth is None:
             continue
+        if not sc.enabled:
+            continue
         auth = sc.auth
         required: List[str] = []
         if auth.type == AuthType.API_KEY and auth.api_key_env:
@@ -339,6 +341,8 @@ def _check_skill_paths(report: DoctorReport, config: MCPSemanticGatewayConfig) -
     for sid, sc in config.servers.items():
         if sc.type != SourceType.SKILL:
             continue
+        if not sc.enabled:
+            continue
         check_name = f"skill-path:{sid}"
         if not sc.path:
             report.add(
@@ -412,7 +416,7 @@ def _check_route_metadata(
     openapi_server_ids = {
         sid
         for sid, sc in config.servers.items()
-        if sc.type == SourceType.OPENAPI
+        if sc.type == SourceType.OPENAPI and sc.enabled
     }
     if not openapi_server_ids:
         return
@@ -558,4 +562,7 @@ def doctor_command(
 
     failures = asyncio.run(_run(skip_network, as_json))
     if failures:
-        raise typer.Exit(code=1 if failures > 0 else 0)
+        # Exit code carries the failure count so CI / scripts can act on it.
+        # POSIX exit codes are 8-bit unsigned; clamp at 255 in case of an
+        # absurdly broken config so we don't wrap to 0.
+        raise typer.Exit(code=min(failures, 255))

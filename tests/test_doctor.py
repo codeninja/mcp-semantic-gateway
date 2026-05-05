@@ -129,6 +129,33 @@ api_key_env = "PETSTORE_API_KEY"
     assert "PETSTORE_API_KEY" in (res.remediation or "")
 
 
+def test_disabled_openapi_server_skips_auth_check(monkeypatch, tmp_path):
+    """A server marked `enabled = false` is ignored by the collector and
+    router; doctor should not flag missing env vars for it."""
+
+    monkeypatch.setenv("MCP_SEMANTIC_GATEWAY_HOME", str(tmp_path))
+    monkeypatch.delenv("PETSTORE_API_KEY", raising=False)
+    _write_config(
+        tmp_path,
+        """
+[servers.petstore]
+type = "openapi"
+url = "https://example.invalid/openapi.json"
+enabled = false
+
+[servers.petstore.auth]
+type = "api_key"
+header_name = "X-API-Key"
+api_key_env = "PETSTORE_API_KEY"
+""",
+    )
+    cfg = load_config(tmp_path / "config.toml")
+    report = doctor_module.DoctorReport()
+    doctor_module._check_auth_env_vars(report, cfg)
+    # No check produced for the disabled server.
+    assert _result_for(report, "auth-env:petstore") is None
+
+
 def test_present_auth_env_var_passes(monkeypatch, tmp_path):
     monkeypatch.setenv("MCP_SEMANTIC_GATEWAY_HOME", str(tmp_path))
     monkeypatch.setenv("PETSTORE_API_KEY", "sk-test")
@@ -171,6 +198,25 @@ path = "/nonexistent/skills/dir"
     res = _result_for(report, "skill-path:local-skills")
     assert res.status == "fail"
     assert res.remediation is not None
+
+
+def test_disabled_skill_server_is_skipped(monkeypatch, tmp_path):
+    """Disabled skill sources must not surface failures from doctor."""
+
+    monkeypatch.setenv("MCP_SEMANTIC_GATEWAY_HOME", str(tmp_path))
+    _write_config(
+        tmp_path,
+        """
+[servers.local-skills]
+type = "skill"
+path = "/nonexistent/skills/dir"
+enabled = false
+""",
+    )
+    cfg = load_config(tmp_path / "config.toml")
+    report = doctor_module.DoctorReport()
+    doctor_module._check_skill_paths(report, cfg)
+    assert _result_for(report, "skill-path:local-skills") is None
 
 
 def test_skill_dir_with_skill_md_passes(monkeypatch, tmp_path):
@@ -254,6 +300,47 @@ url = "https://example.invalid/openapi.json"
 
 
 @pytest.mark.asyncio
+async def test_disabled_openapi_server_skips_route_metadata_check(
+    monkeypatch, tmp_path
+):
+    """Stale rows belonging to disabled OpenAPI servers should not cause
+    route-metadata failures — the operator already turned the server off."""
+
+    monkeypatch.setenv("MCP_SEMANTIC_GATEWAY_HOME", str(tmp_path))
+    _write_config(
+        tmp_path,
+        """
+[servers.petstore]
+type = "openapi"
+url = "https://example.invalid/openapi.json"
+enabled = false
+""",
+    )
+    from mcp_semantic_gateway.storage.metadata_db import MetadataDB, ToolRecord
+
+    metadata_path = tmp_path / "index" / "metadata.db"
+    metadata_path.parent.mkdir(parents=True)
+    db = MetadataDB(metadata_path)
+    await db.initialize()
+    # Stale row from a previous run where the server was enabled.
+    await db.save_tool(
+        ToolRecord(
+            tool_id="petstore::tool::listPets",
+            server_id="petstore",
+            name="listPets",
+            description="List pets",
+            item_type="tool",
+        )
+    )
+
+    cfg = load_config(tmp_path / "config.toml")
+    report = doctor_module.DoctorReport()
+    doctor_module._check_route_metadata(report, cfg)
+    # No openapi-server check was produced because petstore is disabled.
+    assert _result_for(report, "route-metadata") is None
+
+
+@pytest.mark.asyncio
 async def test_route_metadata_present_passes(monkeypatch, tmp_path):
     monkeypatch.setenv("MCP_SEMANTIC_GATEWAY_HOME", str(tmp_path))
     _write_config(
@@ -321,8 +408,21 @@ def test_doctor_cli_exits_nonzero_on_failures(monkeypatch, tmp_path):
     monkeypatch.setenv("MCP_SEMANTIC_GATEWAY_HOME", str(tmp_path))
     runner = CliRunner()
     result = runner.invoke(cli_app, ["doctor", "--no-network"])
+    # Single failure (config-file) → exit code 1. Documented contract is
+    # "exit code = number of failures".
     assert result.exit_code == 1
     assert "init" in result.output
+
+
+def test_doctor_cli_exit_code_equals_failure_count(monkeypatch, tmp_path):
+    """A config that exists but lacks an index produces 2 failures
+    (index-metadata-db + index-vector-db). Exit code must match."""
+
+    monkeypatch.setenv("MCP_SEMANTIC_GATEWAY_HOME", str(tmp_path))
+    _write_config(tmp_path, "[servers]\n")
+    runner = CliRunner()
+    result = runner.invoke(cli_app, ["doctor", "--no-network"])
+    assert result.exit_code == 2, result.output
 
 
 def test_doctor_cli_json_output_carries_results(monkeypatch, tmp_path):
