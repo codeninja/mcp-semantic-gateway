@@ -35,6 +35,7 @@ INTERNAL_TOOL_NAMES = {
     "mcp_semantic_gateway_context",
     "mcp_semantic_gateway_find_prompts",
     "mcp_semantic_gateway_find_skills",
+    "mcp_semantic_gateway_get_skill",
 }
 
 
@@ -132,6 +133,33 @@ class ToolRouter:
                     {"type": "text", "text": json.dumps(items, indent=2)}
                 ],
                 "structuredContent": {"items": items},
+            }
+
+        if name == "mcp_semantic_gateway_get_skill":
+            skill_name = arguments.get("name") or arguments.get("skill_name")
+            if not skill_name:
+                return _error_result(
+                    "mcp_semantic_gateway_get_skill requires a 'name' argument "
+                    "(the skill name returned by find_skills).",
+                    detail={"kind": "validation_error", "missing": ["name"]},
+                )
+            skill = await self.search_core.get_skill_by_name(skill_name)
+            if skill is None:
+                return _error_result(
+                    f"No skill named {skill_name!r} is indexed. Call "
+                    "mcp_semantic_gateway_find_skills first to discover "
+                    "available skill names.",
+                    detail={"kind": "skill_not_found", "name": skill_name},
+                )
+            text = skill.get("body_markdown") or ""
+            if not text:
+                text = (
+                    f"# {skill['name']}\n\n{skill.get('description', '')}\n\n"
+                    "(no SKILL.md body available)"
+                )
+            return {
+                "content": [{"type": "text", "text": text}],
+                "structuredContent": skill,
             }
 
         # Should be unreachable: caller checks INTERNAL_TOOL_NAMES first.

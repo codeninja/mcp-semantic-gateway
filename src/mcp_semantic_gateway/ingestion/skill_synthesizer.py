@@ -19,10 +19,13 @@ import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Optional
 
-from pydantic import BaseModel, Field
+import numpy as np
+import yaml
+from pydantic import BaseModel, ConfigDict, Field
 
+from mcp_semantic_gateway.ingestion.embedder import LocalEmbedder
 from mcp_semantic_gateway.ingestion.observability import EventEmitter, Stage
 from mcp_semantic_gateway.ingestion.skill_clusterer import UseCaseCluster
 from mcp_semantic_gateway.ingestion.skill_validator import (
@@ -207,6 +210,144 @@ def _load_existing_cache_keys(
 
 
 # ---------------------------------------------------------------------------
+# Semantic dedup (skip synthesis when an existing skill already covers the
+# cluster's purpose AND endpoints). See SkillSynthesizerConfig.dedup_* knobs.
+# ---------------------------------------------------------------------------
+
+
+class _ExistingSkill(BaseModel):
+    """Compact view of an on-disk skill used by the dedup check."""
+
+    skill_id: str
+    skill_md_path: Path
+    tool_dependencies: frozenset[str]
+    description: str
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+def _parse_skill_md_description(skill_md_text: str) -> str:
+    """Extract the ``description`` field from a SKILL.md frontmatter block."""
+
+    if not skill_md_text.startswith("---\n"):
+        return ""
+    end = skill_md_text.find("\n---", 4)
+    if end == -1:
+        return ""
+    frontmatter = skill_md_text[4:end]
+    try:
+        data = yaml.safe_load(frontmatter)
+    except yaml.YAMLError:
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    desc = data.get("description")
+    return desc.strip() if isinstance(desc, str) else ""
+
+
+def _load_existing_skills(
+    project_root: Path,
+    output_dir: str,
+    server_id: str,
+    source_hash: str,
+) -> list[_ExistingSkill]:
+    """Return all published skills for ``(server_id, source_hash)``."""
+
+    out: list[_ExistingSkill] = []
+    for meta_path in _meta_glob_for_source(project_root, output_dir, server_id, source_hash):
+        try:
+            data = json.loads(meta_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        skill_id = data.get("skill_id")
+        deps = data.get("tool_dependencies") or []
+        if not isinstance(skill_id, str) or not isinstance(deps, list):
+            continue
+        skill_md_path = meta_path.with_name("SKILL.md")
+        try:
+            description = _parse_skill_md_description(
+                skill_md_path.read_text(encoding="utf-8")
+            )
+        except OSError:
+            description = ""
+        out.append(
+            _ExistingSkill(
+                skill_id=skill_id,
+                skill_md_path=skill_md_path,
+                tool_dependencies=frozenset(d for d in deps if isinstance(d, str)),
+                description=description,
+            )
+        )
+    return out
+
+
+def _cosine(a: np.ndarray, b: np.ndarray) -> float:
+    na = float(np.linalg.norm(a))
+    nb = float(np.linalg.norm(b))
+    if na == 0.0 or nb == 0.0:
+        return 0.0
+    return float(np.dot(a, b) / (na * nb))
+
+
+def _find_duplicate_skill(
+    cluster: UseCaseCluster,
+    existing: list[_ExistingSkill],
+    *,
+    embedder: LocalEmbedder,
+    tool_jaccard_threshold: float,
+    description_cosine_threshold: float,
+) -> Optional[tuple[_ExistingSkill, float, float]]:
+    """Return the first existing skill that subsumes ``cluster``, or None.
+
+    A skill subsumes the cluster when tool-dependency Jaccard >= the
+    Jaccard threshold AND description cosine >= the cosine threshold,
+    UNLESS the cluster's tools are a strict superset of the existing
+    skill's tools — in which case the cluster represents a richer
+    workflow and gets its own skill (the "sufficiently distinct"
+    escape hatch).
+    """
+
+    cluster_tools = frozenset(cluster.tool_name_union)
+    if not cluster_tools or not existing:
+        return None
+
+    candidates: list[tuple[_ExistingSkill, float]] = []
+    for ex in existing:
+        if not ex.tool_dependencies:
+            continue
+        if cluster_tools > ex.tool_dependencies:
+            # Strict superset: cluster adds endpoints the existing skill
+            # lacks. Treat as a genuinely new, richer workflow.
+            continue
+        intersection = cluster_tools & ex.tool_dependencies
+        union = cluster_tools | ex.tool_dependencies
+        jaccard = len(intersection) / len(union) if union else 0.0
+        if jaccard >= tool_jaccard_threshold:
+            candidates.append((ex, jaccard))
+
+    if not candidates:
+        return None
+
+    cluster_desc = cluster.centroid_description.strip()
+    if not cluster_desc:
+        return None
+
+    texts = [cluster_desc] + [c.description for c, _ in candidates]
+    raw_vectors = embedder.embed(texts)
+    cluster_vec = np.asarray(raw_vectors[0], dtype=np.float64)
+
+    for (cand, jaccard), raw_vec in zip(candidates, raw_vectors[1:]):
+        if not cand.description:
+            continue
+        cand_vec = np.asarray(raw_vec, dtype=np.float64)
+        cosine = _cosine(cluster_vec, cand_vec)
+        if cosine >= description_cosine_threshold:
+            return cand, jaccard, cosine
+
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Config + entrypoint
 # ---------------------------------------------------------------------------
 
@@ -235,12 +376,16 @@ class SkillSynthesizerConfig(BaseModel):
     body_max_chars: int = 8000
     output_dir: str = ".mcp_semantic_gateway"
     project_root: Path = Field(default_factory=Path.cwd)
+    dedup_enabled: bool = True
+    dedup_tool_jaccard_threshold: float = 0.7
+    dedup_description_cosine_threshold: float = 0.78
 
 
 class SkillSynthesisResult(BaseModel):
     written: list[str] = Field(default_factory=list)         # paths
     rejected: list[dict] = Field(default_factory=list)
     cached: list[str] = Field(default_factory=list)
+    deduped: list[dict] = Field(default_factory=list)
     errors: list[dict] = Field(default_factory=list)
 
 
@@ -252,10 +397,18 @@ class SkillSynthesizer:
         llm: LLMProvider,
         emitter: EventEmitter,
         config: SkillSynthesizerConfig,
+        *,
+        embedder: LocalEmbedder | None = None,
     ) -> None:
         self._llm = llm
         self._emitter = emitter
         self._config = config
+        self._embedder = embedder
+
+    def _get_embedder(self) -> LocalEmbedder:
+        if self._embedder is None:
+            self._embedder = LocalEmbedder("all-MiniLM-L6-v2")
+        return self._embedder
 
     async def synthesize_for_source(
         self,
@@ -286,6 +439,21 @@ class SkillSynthesizer:
             source_hash=source_hash,
         )
 
+        # Snapshot existing skills once per source. Concurrent _one calls
+        # within this run see the same snapshot — within-run duplicates
+        # between two simultaneously-synthesized clusters are not handled
+        # here (the upstream clusterer already groups similar cases).
+        existing_skills: list[_ExistingSkill] = (
+            _load_existing_skills(
+                project_root=cfg.project_root,
+                output_dir=cfg.output_dir,
+                server_id=server_id,
+                source_hash=source_hash,
+            )
+            if cfg.dedup_enabled
+            else []
+        )
+
         result = SkillSynthesisResult()
         sem = asyncio.Semaphore(cfg.max_concurrency)
         harvested_names = {t["name"] for t in harvested_tools if "name" in t}
@@ -308,6 +476,38 @@ class SkillSynthesizer:
                     )
                     result.cached.append(str(cache_keys[key]))
                     return
+
+                if cfg.dedup_enabled and existing_skills:
+                    dup = _find_duplicate_skill(
+                        cluster,
+                        existing_skills,
+                        embedder=self._get_embedder(),
+                        tool_jaccard_threshold=cfg.dedup_tool_jaccard_threshold,
+                        description_cosine_threshold=cfg.dedup_description_cosine_threshold,
+                    )
+                    if dup is not None:
+                        existing, jaccard, cosine = dup
+                        emitter.emit(
+                            Stage.SKILL_DUP_SUPPRESSED,
+                            server_id=server_id,
+                            cluster_id=cluster.cluster_id,
+                            cluster_hash=cluster.cluster_hash,
+                            existing_skill_id=existing.skill_id,
+                            existing_skill_path=str(existing.skill_md_path),
+                            tool_jaccard=round(jaccard, 4),
+                            description_cosine=round(cosine, 4),
+                        )
+                        result.deduped.append(
+                            {
+                                "cluster_id": cluster.cluster_id,
+                                "cluster_hash": cluster.cluster_hash,
+                                "existing_skill_id": existing.skill_id,
+                                "existing_skill_path": str(existing.skill_md_path),
+                                "tool_jaccard": jaccard,
+                                "description_cosine": cosine,
+                            }
+                        )
+                        return
 
                 start = time.monotonic()
                 try:
@@ -414,6 +614,7 @@ class SkillSynthesizer:
             skills_written=len(result.written),
             skills_rejected=len(result.rejected),
             skills_cached=len(result.cached),
+            skills_deduped=len(result.deduped),
             errors=len(result.errors),
         )
         return result

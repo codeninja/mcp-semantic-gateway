@@ -69,6 +69,7 @@ class Stage(str, Enum):
     CLUSTERING_COMPLETED = "clustering_completed"
     SKILL_SYNTHESIS_STARTED = "skill_synthesis_started"
     SKILL_CACHE_HIT = "skill_cache_hit"
+    SKILL_DUP_SUPPRESSED = "skill_dup_suppressed"
     SKILL_SYNTHESIZED = "skill_synthesized"
     SKILL_VALIDATED = "skill_validated"
     SKILL_REJECTED = "skill_rejected"
