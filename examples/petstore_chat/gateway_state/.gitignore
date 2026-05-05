@@ -1,0 +1,7 @@
+# Regenerated each run (the URL embeds an ephemeral port)
+config.toml
+
+# Local runtime artifacts
+logs/
+models/
+mcp-events.log

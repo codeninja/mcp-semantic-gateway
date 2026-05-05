@@ -63,6 +63,11 @@ def load_config(
     """Load the gateway config, optionally layering overlay TOML files on top.
 
     ``overlays`` are applied in order, so later overlays win.
+
+    Path-valued fields (currently ``servers.*.path`` for Skill sources) that
+    are written as relative paths are resolved against the **base config
+    file's directory** so configs are portable across machines.
+    Absolute paths and ``~``-prefixed paths are left untouched.
     """
 
     path = config_path or DEFAULT_CONFIG_PATH
@@ -74,4 +79,30 @@ def load_config(
         if overlay.exists():
             config_dict = _merge(config_dict, _load_toml(overlay))
 
+    _resolve_relative_paths(config_dict, base=path.parent)
     return MCPSemanticGatewayConfig(**config_dict)
+
+
+def _resolve_relative_paths(config_dict: dict, *, base: Path) -> None:
+    """In-place rewrite of relative ``servers.*.path`` entries to absolutes.
+
+    The reference directory is the directory containing the *base* config
+    file -- not CWD, not gateway_home -- so a config moved between machines
+    keeps its meaning as long as the directory layout is preserved.
+    """
+
+    servers = config_dict.get("servers")
+    if not isinstance(servers, dict):
+        return
+    for sc in servers.values():
+        if not isinstance(sc, dict):
+            continue
+        raw = sc.get("path")
+        if not isinstance(raw, str) or not raw:
+            continue
+        if raw.startswith("~"):
+            continue
+        p = Path(raw)
+        if p.is_absolute():
+            continue
+        sc["path"] = str((base / p).resolve())
