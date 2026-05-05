@@ -325,7 +325,7 @@ async def _run_pipeline(
 
             assert llm is not None
             synthesizer = SkillSynthesizer(
-                llm=llm, emitter=emitter, config=syn_cfg
+                llm=llm, emitter=emitter, config=syn_cfg, embedder=embedder
             )
             try:
                 await synthesizer.synthesize_for_source(

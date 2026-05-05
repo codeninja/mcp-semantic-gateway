@@ -231,3 +231,275 @@ def test_slugify_skill_id_basics():
     assert slugify_skill_id("--bad--name--") == "bad-name"
     # leading non-alpha gets prefixed
     assert slugify_skill_id("3-things") == "s-3-things"
+
+
+# ---------------------------------------------------------------------------
+# Dedup tests — pre-LLM suppression when an existing skill already covers
+# both the cluster's purpose (description cosine) and endpoints (tool Jaccard).
+# ---------------------------------------------------------------------------
+
+
+_STUB_DIM = 8
+
+
+class _StubEmbedder:
+    """Returns a fixed unit vector per text. Two texts get the same vector
+    when their (lowercased, stripped) content matches one of the keys.
+    Unmapped texts get an orthogonal sentinel vector so they never collide.
+    All vectors are the same dimensionality (``_STUB_DIM``) so cosine
+    similarity is well-defined.
+    """
+
+    def __init__(self, vectors_by_key: dict[str, list[float]]) -> None:
+        # Pad supplied vectors to _STUB_DIM so cosine math always lines up.
+        self._vectors_by_key = {
+            key: list(vec) + [0.0] * (_STUB_DIM - len(vec))
+            for key, vec in vectors_by_key.items()
+        }
+        self.calls: list[list[str]] = []
+
+    def embed(self, texts):
+        self.calls.append(list(texts))
+        out: list[list[float]] = []
+        for t in texts:
+            key = t.strip().lower()
+            if key in self._vectors_by_key:
+                out.append(list(self._vectors_by_key[key]))
+            else:
+                # Sentinel keyed on content hash so different unmapped
+                # texts never accidentally collide.
+                vec = [0.0] * _STUB_DIM
+                vec[hash(key) % _STUB_DIM] = 1.0
+                # Tag a second slot to lower the chance of hash-mod collision
+                # against any one-hot mapped vector above.
+                vec[(hash(key) >> 8) % _STUB_DIM] += 0.5
+                out.append(vec)
+        return out
+
+
+# The description that lives in the SKILL.md frontmatter — same text the
+# dedup loader reads back from disk. Defined here so dedup tests can map it
+# to a target embedding vector.
+_DEMO_SKILL_DESCRIPTION = (
+    "Walk through a demo workflow that exercises the synthesizer end to "
+    "end so tests can assert behaviour."
+)
+
+
+@pytest.mark.asyncio
+async def test_dedup_suppresses_skill_with_overlapping_tools_and_purpose(
+    tmp_path, emitter, harvested_tools
+):
+    # First cluster writes a skill.
+    rec1 = _make_record("uc-1", tools=("toolA", "toolB"))
+    cluster1 = _make_cluster("cluster-srv-0", rec1.source_hash, members=[rec1])
+
+    # Second cluster has the same tools and a near-identical centroid
+    # description but a different cluster_hash (different membership).
+    rec2 = _make_record("uc-2", tools=("toolA", "toolB"))
+    cluster2 = UseCaseCluster(
+        cluster_id="cluster-srv-1",
+        server_id="srv",
+        source_hash=rec2.source_hash,
+        use_case_ids=[rec2.id],
+        tool_name_union=["toolA", "toolB"],
+        centroid_description="duplicate-purpose-description",
+        cluster_hash="different-hash-but-same-purpose",
+    )
+
+    embedder = _StubEmbedder(
+        {
+            # The new cluster's centroid_description (cluster2) gets vec X.
+            "duplicate-purpose-description": [1.0, 0.0, 0.0, 0.0],
+            # The on-disk SKILL.md description for the existing skill also
+            # gets vec X — cosine = 1.0, well above the 0.78 threshold.
+            _DEMO_SKILL_DESCRIPTION.strip().lower(): [1.0, 0.0, 0.0, 0.0],
+        }
+    )
+
+    # Two LLM responses queued; only one should actually be consumed.
+    llm = StubLLM(
+        [
+            _make_response(name="first-skill", deps=("toolA", "toolB")),
+            _make_response(name="should-not-fire", deps=("toolA", "toolB")),
+        ]
+    )
+    cfg = SkillSynthesizerConfig(model_id="stub-model-v1", project_root=tmp_path)
+    syn = SkillSynthesizer(llm=llm, emitter=emitter, config=cfg, embedder=embedder)
+
+    # First synthesis run lands the skill on disk.
+    first = await syn.synthesize_for_source(
+        server_id="srv",
+        source_hash=rec1.source_hash,
+        clusters=[cluster1],
+        records_by_id={rec1.id: rec1},
+        harvested_tools=harvested_tools,
+    )
+    assert len(first.written) == 1
+
+    # Second run with the duplicate cluster: dedup must suppress synthesis.
+    second = await syn.synthesize_for_source(
+        server_id="srv",
+        source_hash=rec2.source_hash,
+        clusters=[cluster2],
+        records_by_id={rec2.id: rec2},
+        harvested_tools=harvested_tools,
+    )
+    assert second.written == []
+    assert len(second.deduped) == 1
+    assert second.deduped[0]["existing_skill_id"] == "first-skill"
+    # First skill consumed one LLM call, the dup consumed zero.
+    assert len(llm.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_dedup_does_not_fire_for_strict_superset_of_existing_tools(
+    tmp_path, emitter, harvested_tools
+):
+    # Existing skill covers {toolA}; new cluster adds toolB → richer workflow.
+    rec1 = _make_record("uc-1", tools=("toolA",))
+    cluster1 = _make_cluster("cluster-srv-0", rec1.source_hash, members=[rec1])
+
+    rec2 = _make_record("uc-2", tools=("toolA", "toolB"))
+    cluster2 = UseCaseCluster(
+        cluster_id="cluster-srv-1",
+        server_id="srv",
+        source_hash=rec2.source_hash,
+        use_case_ids=[rec2.id],
+        tool_name_union=["toolA", "toolB"],
+        centroid_description=rec1.description,  # same purpose text
+        cluster_hash="superset-hash",
+    )
+
+    # If the dedup logic were to mistakenly fire, the embedder would return
+    # identical vectors for the (deliberately equal) descriptions.
+    embedder = _StubEmbedder(
+        {
+            rec1.description.strip().lower(): [1.0, 0.0, 0.0, 0.0],
+            _DEMO_SKILL_DESCRIPTION.strip().lower(): [1.0, 0.0, 0.0, 0.0],
+        }
+    )
+
+    llm = StubLLM(
+        [
+            _make_response(name="basic-skill", deps=("toolA",)),
+            _make_response(name="richer-skill", deps=("toolA", "toolB")),
+        ]
+    )
+    cfg = SkillSynthesizerConfig(model_id="stub-model-v1", project_root=tmp_path)
+    syn = SkillSynthesizer(llm=llm, emitter=emitter, config=cfg, embedder=embedder)
+
+    await syn.synthesize_for_source(
+        server_id="srv",
+        source_hash=rec1.source_hash,
+        clusters=[cluster1],
+        records_by_id={rec1.id: rec1},
+        harvested_tools=harvested_tools,
+    )
+    second = await syn.synthesize_for_source(
+        server_id="srv",
+        source_hash=rec2.source_hash,
+        clusters=[cluster2],
+        records_by_id={rec2.id: rec2},
+        harvested_tools=harvested_tools,
+    )
+
+    # Strict superset → richer skill must be synthesized, not deduped.
+    assert len(second.written) == 1
+    assert second.deduped == []
+
+
+@pytest.mark.asyncio
+async def test_dedup_does_not_fire_when_purpose_differs(
+    tmp_path, emitter, harvested_tools
+):
+    # Same tools, different purpose descriptions → not a dup.
+    rec1 = _make_record("uc-1", tools=("toolA", "toolB"))
+    cluster1 = _make_cluster("cluster-srv-0", rec1.source_hash, members=[rec1])
+
+    rec2 = _make_record("uc-2", tools=("toolA", "toolB"))
+    cluster2 = UseCaseCluster(
+        cluster_id="cluster-srv-1",
+        server_id="srv",
+        source_hash=rec2.source_hash,
+        use_case_ids=[rec2.id],
+        tool_name_union=["toolA", "toolB"],
+        centroid_description="completely-different-purpose-text",
+        cluster_hash="distinct-hash",
+    )
+
+    # Map purposes to orthogonal vectors so cosine is 0. Both the new
+    # cluster's centroid AND the on-disk skill description must be mapped
+    # explicitly — falling through to the sentinel could match by chance.
+    embedder = _StubEmbedder(
+        {
+            _DEMO_SKILL_DESCRIPTION.strip().lower(): [1.0, 0.0, 0.0, 0.0],
+            "completely-different-purpose-text": [0.0, 1.0, 0.0, 0.0],
+        }
+    )
+
+    llm = StubLLM(
+        [
+            _make_response(name="skill-one", deps=("toolA", "toolB")),
+            _make_response(name="skill-two", deps=("toolA", "toolB")),
+        ]
+    )
+    cfg = SkillSynthesizerConfig(model_id="stub-model-v1", project_root=tmp_path)
+    syn = SkillSynthesizer(llm=llm, emitter=emitter, config=cfg, embedder=embedder)
+
+    await syn.synthesize_for_source(
+        server_id="srv", source_hash=rec1.source_hash, clusters=[cluster1],
+        records_by_id={rec1.id: rec1}, harvested_tools=harvested_tools,
+    )
+    second = await syn.synthesize_for_source(
+        server_id="srv", source_hash=rec2.source_hash, clusters=[cluster2],
+        records_by_id={rec2.id: rec2}, harvested_tools=harvested_tools,
+    )
+
+    assert len(second.written) == 1
+    assert second.deduped == []
+
+
+@pytest.mark.asyncio
+async def test_dedup_can_be_disabled_via_config(
+    tmp_path, emitter, harvested_tools
+):
+    rec1 = _make_record("uc-1", tools=("toolA", "toolB"))
+    cluster1 = _make_cluster("cluster-srv-0", rec1.source_hash, members=[rec1])
+
+    rec2 = _make_record("uc-2", tools=("toolA", "toolB"))
+    cluster2 = UseCaseCluster(
+        cluster_id="cluster-srv-1",
+        server_id="srv",
+        source_hash=rec2.source_hash,
+        use_case_ids=[rec2.id],
+        tool_name_union=["toolA", "toolB"],
+        centroid_description=rec1.description,
+        cluster_hash="other-hash",
+    )
+
+    llm = StubLLM(
+        [
+            _make_response(name="skill-one", deps=("toolA", "toolB")),
+            _make_response(name="skill-two", deps=("toolA", "toolB")),
+        ]
+    )
+    cfg = SkillSynthesizerConfig(
+        model_id="stub-model-v1",
+        project_root=tmp_path,
+        dedup_enabled=False,
+    )
+    # No embedder injected: with dedup disabled, none should be needed.
+    syn = SkillSynthesizer(llm=llm, emitter=emitter, config=cfg)
+
+    await syn.synthesize_for_source(
+        server_id="srv", source_hash=rec1.source_hash, clusters=[cluster1],
+        records_by_id={rec1.id: rec1}, harvested_tools=harvested_tools,
+    )
+    second = await syn.synthesize_for_source(
+        server_id="srv", source_hash=rec2.source_hash, clusters=[cluster2],
+        records_by_id={rec2.id: rec2}, harvested_tools=harvested_tools,
+    )
+
+    assert len(second.written) == 1
+    assert second.deduped == []
