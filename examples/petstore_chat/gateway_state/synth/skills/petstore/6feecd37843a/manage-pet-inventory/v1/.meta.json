@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "skill_id": "manage-pet-inventory",
+  "skill_version": 1,
+  "source": {
+    "server_id": "petstore",
+    "source_hash": "6feecd37843a7cbf68201c93ffc21a9db707e278265ba5e31b079565b0fc716a",
+    "source_hash_short": "6feecd37843a"
+  },
+  "cluster": {
+    "cluster_id": "cluster-petstore-0",
+    "cluster_hash": "a88020a180c78535fcc432f733c57fd8279ae43ede754131cf330ef9ed33f2bc",
+    "use_case_ids": [
+      "uc-petstore-pets-0-0",
+      "uc-petstore-pets-0-2"
+    ]
+  },
+  "tool_dependencies": [
+    "listPets",
+    "createPet",
+    "deletePet"
+  ],
+  "generation": {
+    "model": "gpt-4o-mini",
+    "prompt_version": "v1",
+    "generated_at": "2026-05-05T02:35:14Z",
+    "validation_passes": [
+      "spec-conformance",
+      "tool-grounding",
+      "length-bounds"
+    ]
+  },
+  "status": "published"
+}

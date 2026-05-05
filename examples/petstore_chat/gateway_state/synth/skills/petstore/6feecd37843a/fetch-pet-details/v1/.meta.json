@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "skill_id": "fetch-pet-details",
+  "skill_version": 1,
+  "source": {
+    "server_id": "petstore",
+    "source_hash": "6feecd37843a7cbf68201c93ffc21a9db707e278265ba5e31b079565b0fc716a",
+    "source_hash_short": "6feecd37843a"
+  },
+  "cluster": {
+    "cluster_id": "cluster-petstore-1",
+    "cluster_hash": "9ee17f0fe870ba1bc1f447146622d0fd040b092d3214cdfec62cecdf25841ae1",
+    "use_case_ids": [
+      "uc-petstore-pets-0-1"
+    ]
+  },
+  "tool_dependencies": [
+    "getPet"
+  ],
+  "generation": {
+    "model": "gpt-4o-mini",
+    "prompt_version": "v1",
+    "generated_at": "2026-05-05T02:35:12Z",
+    "validation_passes": [
+      "spec-conformance",
+      "tool-grounding",
+      "length-bounds"
+    ]
+  },
+  "status": "published"
+}

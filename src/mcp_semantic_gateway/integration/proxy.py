@@ -10,6 +10,8 @@ import asyncio
 import sys
 import json
 import os
+import time
+from typing import Optional, TextIO
 
 
 _GATEWAY_TOOL_DEFS = [
@@ -43,6 +45,22 @@ class MCPSemanticGatewayProxy:
         self.openapi_executor = OpenAPIExecutor(self.config)
         self.clients = {}
         self.router: ToolRouter
+        # Optional raw-RPC line log for debugging / demos. When
+        # ``MCP_SEMANTIC_GATEWAY_LOG_RPC`` points at a path, every line
+        # received on stdin and every response written to stdout is
+        # appended with a timestamp and direction marker (``in`` / ``out``).
+        # Parents can tail this file to render the live MCP event stream.
+        self._rpc_log: Optional[TextIO] = None
+        rpc_path = os.environ.get("MCP_SEMANTIC_GATEWAY_LOG_RPC")
+        if rpc_path:
+            self._rpc_log = open(rpc_path, "a", buffering=1)  # line-buffered
+
+    def _log_rpc(self, direction: str, payload: str) -> None:
+        if self._rpc_log is None:
+            return
+        ts = f"{time.time():.3f}"
+        line = payload.rstrip("\n").replace("\n", "\\n")
+        self._rpc_log.write(f"{ts}\t{direction}\t{line}\n")
 
     async def start(self):
         for server_id, server_config in self.config.servers.items():
@@ -87,26 +105,34 @@ class MCPSemanticGatewayProxy:
             except Exception:
                 # Best effort: continue stopping the rest even if one hangs.
                 pass
+        if self._rpc_log is not None:
+            try:
+                self._rpc_log.close()
+            except Exception:
+                pass
+
+    def _emit(self, resp: dict) -> None:
+        payload = json.dumps(resp)
+        self._log_rpc("out", payload)
+        sys.stdout.write(payload + "\n")
+        sys.stdout.flush()
 
     async def _read_loop(self, reader: asyncio.StreamReader) -> None:
         while True:
             line = await reader.readline()
             if not line: break
 
+            self._log_rpc("in", line.decode("utf-8", errors="replace"))
             req = json.loads(line)
             method = req.get("method")
 
             if method == "tools/list":
                 tools = await self.core.get_filtered_tools("local-proxy")
                 tools.extend(_GATEWAY_TOOL_DEFS)
-                resp = {"jsonrpc": "2.0", "id": req["id"], "result": {"tools": tools}}
-                sys.stdout.write(json.dumps(resp) + "\n")
-                sys.stdout.flush()
+                self._emit({"jsonrpc": "2.0", "id": req["id"], "result": {"tools": tools}})
             elif method == "prompts/list":
                 prompts = await self.core.get_filtered_prompts("local-proxy")
-                resp = {"jsonrpc": "2.0", "id": req["id"], "result": {"prompts": prompts}}
-                sys.stdout.write(json.dumps(resp) + "\n")
-                sys.stdout.flush()
+                self._emit({"jsonrpc": "2.0", "id": req["id"], "result": {"prompts": prompts}})
             elif method == "tools/call":
                 name = req["params"]["name"]
                 args = req["params"].get("arguments", {})
@@ -119,9 +145,6 @@ class MCPSemanticGatewayProxy:
                         "id": req["id"],
                         "error": {"code": -32601, "message": str(e)},
                     }
-                sys.stdout.write(json.dumps(resp) + "\n")
-                sys.stdout.flush()
+                self._emit(resp)
             elif method == "initialize":
-                resp = {"jsonrpc": "2.0", "id": req["id"], "result": {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "MCPSemanticGatewayProxy", "version": "1.0.0"}}}
-                sys.stdout.write(json.dumps(resp) + "\n")
-                sys.stdout.flush()
+                self._emit({"jsonrpc": "2.0", "id": req["id"], "result": {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "MCPSemanticGatewayProxy", "version": "1.0.0"}}})
