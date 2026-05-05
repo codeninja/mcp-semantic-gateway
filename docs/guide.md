@@ -331,9 +331,16 @@ other MCP-speaking clients at. See *Connect your agent* below.
 mcp-semantic-gateway server
 ```
 
-Listens on `0.0.0.0:8000` (configurable via `[http]` in config). Each
-request must carry `X-Tenant-ID` so contexts don't leak between
-clients.
+Listens on `127.0.0.1:8000` by default (configurable via `[http]` in
+config). Each request should carry `X-Tenant-ID` so contexts don't leak
+between clients.
+
+The HTTP surface keeps the legacy MCP HTTP+SSE compatibility shape:
+`GET /sse` opens the event stream and first emits an `endpoint` event
+containing the session-specific `POST /message?sessionId=...` URI.
+JSON-RPC responses for that session are delivered as SSE `message`
+events; direct non-SSE `POST /message` still returns a JSON-RPC response
+body for simple integrations.
 
 ---
 

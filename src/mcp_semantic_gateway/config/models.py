@@ -148,10 +148,16 @@ class LoggingConfig(BaseModel):
     max_files: int = Field(default=5, ge=1, le=100)
 
 class ServerHttpConfig(BaseModel):
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = Field(default=8000, ge=1, le=65535)
     api_key: Optional[str] = None
-    cors_origins: List[str] = Field(default_factory=lambda: ["*"])
+    cors_origins: List[str] = Field(
+        default_factory=lambda: [
+            "http://localhost",
+            "http://127.0.0.1",
+            "http://[::1]",
+        ]
+    )
 
 class LLMConfig(BaseModel):
     """Provider-agnostic LLM configuration.

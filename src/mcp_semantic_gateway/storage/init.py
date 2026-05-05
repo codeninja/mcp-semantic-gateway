@@ -37,6 +37,15 @@ def initialize_data_dir():
         logging = tomlkit.table()
         logging.add("enabled", True)
         doc.add("logging", logging)
+
+        http = tomlkit.table()
+        http.add("host", "127.0.0.1")
+        http.add("port", 8000)
+        http.add(
+            "cors_origins",
+            ["http://localhost", "http://127.0.0.1", "http://[::1]"],
+        )
+        doc.add("http", http)
         
         # Empty servers table
         doc.add("servers", tomlkit.table())
