@@ -7,8 +7,7 @@ from mcp_semantic_gateway.retrieval.core import SearchCore
 from mcp_semantic_gateway.retrieval.registry import ToolRegistry
 from mcp_semantic_gateway.integration.openapi_executor import OpenAPIExecutor
 from mcp_semantic_gateway.integration.router import ToolRouter, ToolNotFound
-from pathlib import Path
-from typing import Optional, Dict, List
+from typing import Optional
 import asyncio
 import json
 

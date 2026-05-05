@@ -35,3 +35,6 @@ Thumbs.db
 
 .claude/worktrees/
 .mcp_semantic_gateway/
+
+# mkdocs build output
+site/

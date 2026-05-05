@@ -6,13 +6,10 @@ pipeline: how persisted use case records (produced upstream by
 turned into agent-skills-specification-conformant skill packages cached
 in the project folder.
 
-This is a pragmatic lift of
-[api-introspection-skills/02-skill-packages.md](api-introspection-skills/02-skill-packages.md)
-and
-[api-knowledge-gateway/10-skill-generation.md](api-knowledge-gateway/10-skill-generation.md),
-reduced to what is shippable on top of the current code without an
-Atlas, code graph, or pattern store. The discriminator is preserved in
-spirit (cheap deterministic grounding) but tightly scoped to
+This is a pragmatic lift of earlier internal designs (api-introspection-skills
+/ api-knowledge-gateway), reduced to what is shippable on top of the current
+code without an Atlas, code graph, or pattern store. The discriminator is
+preserved in spirit (cheap deterministic grounding) but tightly scoped to
 "hallucinated tool names cannot ship."
 
 ## Goal

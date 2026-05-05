@@ -84,6 +84,65 @@ class SearchCore:
             item["arguments"] = json.loads(input_schema_json) if input_schema_json else []
         return item
 
+    async def search_with_scores(
+        self,
+        query: str,
+        top_k: Optional[int] = None,
+        item_types: Optional[List[str]] = None,
+    ) -> List[dict]:
+        """Run a semantic search and return scored matches.
+
+        Each match is a dict with ``name``, ``server_id``, ``item_type``,
+        ``description``, and ``score`` (cosine similarity in ``[0, 1]``,
+        higher = more similar). Used by the ``mcp-semantic-gateway search``
+        CLI to sanity-check what the gateway would return for a given
+        query directly against the same retrieval path the proxy uses.
+        """
+
+        if not query or not query.strip():
+            return []
+        k = top_k if top_k is not None else self.config.retrieval.top_k
+        query_vector = self.embedder.embed([query])[0]
+        # Pull a wider candidate set so item_type filtering can still
+        # produce ``k`` results in the common case.
+        oversample = k * 5 if item_types else k
+        labels, distances = self.vector_store.knn_query(
+            query_vector, k=min(100, oversample)
+        )
+        if not labels:
+            return []
+
+        items: list[dict] = []
+        async with aiosqlite.connect(self.db_path) as db:
+            for label, distance in zip(labels, distances):
+                async with db.execute(
+                    "SELECT name, description, item_type, server_id "
+                    "FROM tools LIMIT 1 OFFSET ?",
+                    (label,),
+                ) as cursor:
+                    row = await cursor.fetchone()
+                if not row:
+                    continue
+                name, description, item_type, server_id = row
+                if item_types and item_type not in item_types:
+                    continue
+                if self.registry is not None and item_type == "tool":
+                    resolved = self.registry.canonical_for(server_id, name)
+                    if resolved:
+                        name = resolved
+                items.append(
+                    {
+                        "name": name,
+                        "server_id": server_id,
+                        "item_type": item_type,
+                        "description": description or "",
+                        "score": max(0.0, 1.0 - float(distance)),
+                    }
+                )
+                if len(items) >= k:
+                    break
+        return items
+
     async def get_filtered_tools(self, tenant_id: str) -> List[dict]:
         return await self.get_filtered_items(tenant_id, "tool")
 

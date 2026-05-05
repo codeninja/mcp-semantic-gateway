@@ -5,7 +5,6 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-import pytest
 
 from mcp_semantic_gateway.ingestion.skill_writer import (
     SkillPackage,

@@ -3,9 +3,7 @@ from mcp_semantic_gateway.config.loader import load_config
 from mcp_semantic_gateway.storage.init import initialize_data_dir
 from mcp_semantic_gateway.storage.vector_store import VectorStore
 from mcp_semantic_gateway.ingestion.embedder import LocalEmbedder
-from mcp_semantic_gateway.storage.metadata_db import MetadataDB
 import aiosqlite
-import json
 
 async def run_query(query_text: str):
     base_dir = initialize_data_dir()

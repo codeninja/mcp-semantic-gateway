@@ -1,6 +1,5 @@
 import sys
 import json
-import time
 
 def main():
     # Simple MCP server with 250 tools for stress testing

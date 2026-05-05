@@ -1,8 +1,5 @@
 import pytest
-import json
-import asyncio
 from fastapi import FastAPI
-from httpx import AsyncClient
 import uvicorn
 import threading
 import time

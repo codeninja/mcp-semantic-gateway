@@ -1,7 +1,6 @@
 import asyncio
 import os
 import json
-import signal
 import httpx
 import yaml
 from pathlib import Path
@@ -120,7 +119,8 @@ class MCPClient:
             tools = []
             while True:
                 line = await self.process.stdout.readline()
-                if not line: break
+                if not line:
+                    break
                 resp = json.loads(line)
                 if resp.get("id") == 2:
                     result = resp.get("result", {})
@@ -179,7 +179,8 @@ class MCPClient:
             prompts = []
             while True:
                 line = await self.process.stdout.readline()
-                if not line: break
+                if not line:
+                    break
                 resp = json.loads(line)
                 if resp.get("id") == 102:
                     result = resp.get("result", {})
@@ -201,19 +202,23 @@ class Collector:
             try:
                 if server_cfg.type == SourceType.OPENAPI:
                     items = await self.collect_openapi(server_id, server_cfg)
-                    for i in items: i["_item_type"] = "tool"
+                    for i in items:
+                        i["_item_type"] = "tool"
                 elif server_cfg.type == SourceType.SKILL:
                     items = await self.collect_skills(server_id, server_cfg)
-                    for i in items: i["_item_type"] = "skill"
+                    for i in items:
+                        i["_item_type"] = "skill"
                 else:
                     client = MCPClient(server_id, server_cfg)
                     await client.start()
                     try:
                         tools = await client.call_tools_list()
-                        for t in tools: t["_item_type"] = "tool"
-                        
+                        for t in tools:
+                            t["_item_type"] = "tool"
+
                         prompts = await client.call_prompts_list()
-                        for p in prompts: p["_item_type"] = "prompt"
+                        for p in prompts:
+                            p["_item_type"] = "prompt"
                         
                         items = tools + prompts
                     finally:

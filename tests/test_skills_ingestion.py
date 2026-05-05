@@ -1,6 +1,4 @@
 import pytest
-import os
-from pathlib import Path
 from mcp_semantic_gateway.ingestion.collector import Collector
 from mcp_semantic_gateway.config.models import MCPSemanticGatewayConfig, ServerConfig, SourceType
 

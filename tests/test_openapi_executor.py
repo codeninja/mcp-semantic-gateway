@@ -7,10 +7,9 @@ real uvicorn fixture.
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import json
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
 import httpx
 import pytest

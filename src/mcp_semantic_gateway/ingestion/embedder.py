@@ -1,6 +1,5 @@
 from typing import List, Optional
 from sentence_transformers import SentenceTransformer
-import numpy as np
 
 class LocalEmbedder:
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):

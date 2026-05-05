@@ -13,7 +13,6 @@ import json
 import os
 from pathlib import Path
 
-import pytest
 import yaml
 
 from mcp_semantic_gateway.ingestion.forge import ForgeEngine
