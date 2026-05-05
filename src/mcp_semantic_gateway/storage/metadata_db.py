@@ -33,6 +33,11 @@ class ToolRecord:
     # parameter locations, body schema, security, server overrides). NULL for
     # native MCP tools, skills, or prompts.
     route_metadata: Optional[dict] = None
+    # Stable hnswlib label assigned at the last successful ``index_all`` pass.
+    # ``index_writer.index_all`` clears this column on every row before
+    # re-saving fresh records, so stale rows from removed/renamed sources
+    # carry ``vector_id = NULL`` and never satisfy ``WHERE vector_id = ?``.
+    vector_id: Optional[int] = None
 
 class MetadataDB:
     def __init__(self, db_path: Path):
@@ -68,14 +73,17 @@ class MetadataDB:
                     index_version INTEGER,
                     item_type TEXT DEFAULT 'tool',
                     route_metadata TEXT,
+                    vector_id INTEGER,
                     FOREIGN KEY(server_id) REFERENCES servers(server_id)
                 )
             """)
-            # Migrate older databases that predate route_metadata.
+            # Migrate older databases that predate route_metadata / vector_id.
             cursor = await db.execute("PRAGMA table_info(tools)")
             existing_cols = {row[1] for row in await cursor.fetchall()}
             if "route_metadata" not in existing_cols:
                 await db.execute("ALTER TABLE tools ADD COLUMN route_metadata TEXT")
+            if "vector_id" not in existing_cols:
+                await db.execute("ALTER TABLE tools ADD COLUMN vector_id INTEGER")
             # Lookup index for the executor's tool_name -> route_metadata path.
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_tools_name ON tools(name)"
@@ -83,6 +91,11 @@ class MetadataDB:
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_tools_server_name "
                 "ON tools(server_id, name)"
+            )
+            # Lookup index for the SearchCore vector-label -> tool path.
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tools_vector_id "
+                "ON tools(vector_id)"
             )
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS index_versions (
@@ -159,7 +172,8 @@ class MetadataDB:
                 sql = (
                     "SELECT tool_id, server_id, name, title, description, "
                     "input_schema, output_schema, annotations, embedding_text, "
-                    "indexed_at, index_version, item_type, route_metadata "
+                    "indexed_at, index_version, item_type, route_metadata, "
+                    "vector_id "
                     f"FROM tools WHERE tool_id IN ({placeholders})"
                 )
                 cursor = await db.execute(sql, chunk)
@@ -176,7 +190,7 @@ class MetadataDB:
                 SELECT tool_id, server_id, name, title, description,
                        input_schema, output_schema, annotations,
                        embedding_text, indexed_at, index_version, item_type,
-                       route_metadata
+                       route_metadata, vector_id
                 FROM tools
                 WHERE tool_id = ?
                 """,
@@ -194,8 +208,8 @@ class MetadataDB:
                     tool_id, server_id, name, title, description,
                     input_schema, output_schema, annotations,
                     embedding_text, indexed_at, index_version, item_type,
-                    route_metadata
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    route_metadata, vector_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 tool.tool_id, tool.server_id, tool.name, tool.title, tool.description,
                 json.dumps(tool.input_schema) if tool.input_schema else None,
@@ -203,7 +217,20 @@ class MetadataDB:
                 json.dumps(tool.annotations) if tool.annotations else None,
                 tool.embedding_text, tool.indexed_at, tool.index_version, tool.item_type,
                 json.dumps(tool.route_metadata) if tool.route_metadata else None,
+                tool.vector_id,
             ))
+            await db.commit()
+
+    async def clear_vector_ids(self) -> None:
+        """Set ``vector_id = NULL`` on every tools row.
+
+        Called by ``index_writer.index_all`` at the start of every ingestion
+        pass so stale rows from removed/renamed sources cannot accidentally
+        match a fresh hnswlib label. Cleanup of those stale rows themselves
+        is handled separately."""
+
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("UPDATE tools SET vector_id = NULL")
             await db.commit()
 
     # ------------------------------------------------------------------
@@ -369,6 +396,7 @@ def _row_to_tool_record(row) -> ToolRecord:
         index_version=int(row[10]) if row[10] is not None else 0,
         item_type=row[11] or "tool",
         route_metadata=json.loads(row[12]) if row[12] else None,
+        vector_id=int(row[13]) if row[13] is not None else None,
     )
 
 

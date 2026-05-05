@@ -61,7 +61,11 @@ class SearchCore:
         items = []
         async with aiosqlite.connect(self.db_path) as db:
             for label in labels:
-                async with db.execute("SELECT name, description, input_schema, item_type, server_id FROM tools LIMIT 1 OFFSET ?", (label,)) as cursor:
+                async with db.execute(
+                    "SELECT name, description, input_schema, item_type, server_id "
+                    "FROM tools WHERE vector_id = ?",
+                    (int(label),),
+                ) as cursor:
                     row = await cursor.fetchone()
                     if row and row[3] == item_type:
                         items.append(self._row_to_item(row, item_type))
@@ -117,8 +121,8 @@ class SearchCore:
             for label, distance in zip(labels, distances):
                 async with db.execute(
                     "SELECT name, description, item_type, server_id "
-                    "FROM tools LIMIT 1 OFFSET ?",
-                    (label,),
+                    "FROM tools WHERE vector_id = ?",
+                    (int(label),),
                 ) as cursor:
                     row = await cursor.fetchone()
                 if not row:
