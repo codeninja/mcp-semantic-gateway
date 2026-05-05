@@ -147,7 +147,8 @@ class MCPSemanticGatewayProxy:
     async def _read_loop(self, reader: asyncio.StreamReader) -> None:
         while True:
             line = await reader.readline()
-            if not line: break
+            if not line:
+                break
 
             self._log_rpc("in", line.decode("utf-8", errors="replace"))
             req = json.loads(line)

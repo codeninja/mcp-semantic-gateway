@@ -6,13 +6,11 @@ are chunked, sent to an LLM, and turned into persisted use-case records
 that downstream skill synthesis ([skill-generation.md](skill-generation.md))
 clusters and consumes.
 
-This is a pragmatic lift of the technique described in
-[api-knowledge-gateway/05-pattern-mining.md](api-knowledge-gateway/05-pattern-mining.md)
-(use-case mining gradient) and
-[api-introspection-skills/05-synthesis-and-validation.md](api-introspection-skills/05-synthesis-and-validation.md)
-(use-case generation strategy), reduced to what is shippable on top of
-the current `src/mcp_semantic_gateway/` codebase without introducing the
-Atlas, code graph, or pattern store.
+This is a pragmatic lift of the technique described in earlier
+internal designs (api-knowledge-gateway pattern mining gradient,
+api-introspection-skills use-case generation strategy), reduced to what
+is shippable on top of the current `src/mcp_semantic_gateway/` codebase
+without introducing the Atlas, code graph, or pattern store.
 
 ## Goal
 

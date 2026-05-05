@@ -1,5 +1,4 @@
 import pytest
-import asyncio
 import httpx
 import os
 import shutil
@@ -8,7 +7,7 @@ from unittest.mock import MagicMock
 import numpy as np
 
 from mcp_semantic_gateway.integration.server import app
-from mcp_semantic_gateway.config.models import MCPSemanticGatewayConfig, ServerConfig, SourceType
+from mcp_semantic_gateway.config.models import ServerConfig, SourceType
 from mcp_semantic_gateway.integration import server as server_mod
 
 # Configure test environment
@@ -30,7 +29,6 @@ def setup_test_env():
     
     # Manually re-initialize the server's core with the test directory
     from mcp_semantic_gateway.config.loader import load_config
-    from mcp_semantic_gateway.storage.init import initialize_data_dir
     from mcp_semantic_gateway.retrieval.core import SearchCore
     
     test_config = load_config()

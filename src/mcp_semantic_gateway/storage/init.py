@@ -1,6 +1,4 @@
-import os
 import tomlkit
-from pathlib import Path
 from mcp_semantic_gateway.config.loader import gateway_home
 
 def initialize_data_dir():

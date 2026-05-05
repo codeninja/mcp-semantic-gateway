@@ -296,13 +296,17 @@ Full design notes live in
 |---|---|
 | `mcp-semantic-gateway init` | Scaffold `~/.mcp_semantic_gateway/` with a starter config. |
 | `mcp-semantic-gateway index` | (Re-)embed every tool, prompt, and skill into the local vector store. |
+| `mcp-semantic-gateway doctor` | Validate config, index, auth env vars, OpenAPI reachability, and skill paths. Exits non-zero with actionable remediation on any failure. |
+| `mcp-semantic-gateway search "<query>"` | Sanity-check retrieval. Prints the top matches with name, source, item type, and similarity score. `--top-k`, `--type`, `--json` available. |
 | `mcp-semantic-gateway proxy` | Run the stdio MCP server. This is what your agent connects to. |
 | `mcp-semantic-gateway server` | Run as an HTTP server (for remote clients). |
-| `mcp-semantic-gateway search "<query>"` | Sanity-check what the gateway would return for a given query. |
 | `mcp-semantic-gateway synth` | Mine use cases + cluster + synthesize `SKILL.md` packages for opted-in OpenAPI sources. |
 | `mcp-semantic-gateway synth status` | Show last-run summary, cache hits, token spend, rejections. |
 | `mcp-semantic-gateway synth init-skill-source` | Register generated skills as a `type = "skill"` source in your config. |
 | `mcp-semantic-gateway onboard <agent>` | Install bundled `SKILL.md` packages into a coding agent's skills dir (`claude`, `codex`, `opencode`, `pi`). |
+
+For end-to-end setup, troubleshooting, and per-source recipes, see the
+[Setup Guide](docs/guide.md).
 
 ---
 
@@ -338,8 +342,10 @@ Full design notes live in
 - **Observable.** Every synthesis stage emits structured JSONL events;
   failures and rejections write per-run diagnostics you can grep.
 
-For the layered architecture, domain models, and state machines, see the
-[Full Technical Specification](docs/specs/SPEC.md).
+For the synthesis pipeline, prompt versioning, and validation gates,
+see the [design docs](docs/design/) — particularly
+[use-case-synthesis.md](docs/design/use-case-synthesis.md) and
+[skill-generation.md](docs/design/skill-generation.md).
 
 ---
 

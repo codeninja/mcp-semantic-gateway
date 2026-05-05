@@ -29,7 +29,7 @@ import hashlib
 import json
 import time
 from datetime import datetime, timezone
-from typing import Iterable, Literal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 

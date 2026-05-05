@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -166,7 +165,7 @@ async def test_end_to_end_openapi_persists_records(tmp_paths):
             assert n in harvested_names
         assert isinstance(rec, UseCaseRecord)
         assert re.fullmatch(r"[0-9a-f]{64}", rec.use_case_hash), rec.use_case_hash
-        assert rec.id.startswith(f"uc-sample-api-")
+        assert rec.id.startswith("uc-sample-api-")
         assert rec.generated_by == f"{stub.model_id}@v1"
 
     events = _read_events(log_path)

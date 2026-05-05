@@ -3,10 +3,14 @@ from typing import Optional
 from mcp_semantic_gateway import __version__
 from mcp_semantic_gateway.cli.synth import synth_app
 from mcp_semantic_gateway.cli.onboard import onboard as onboard_cmd
+from mcp_semantic_gateway.cli.search import search_command
+from mcp_semantic_gateway.cli.doctor import doctor_command
 
 app = typer.Typer(name="mcp-semantic-gateway", help="Semantic Tool Discovery Middleware for MCP")
 app.add_typer(synth_app, name="synth")
 app.command("onboard")(onboard_cmd)
+app.command("search")(search_command)
+app.command("doctor")(doctor_command)
 
 def version_callback(value: bool):
     if value:
@@ -23,10 +27,10 @@ def main(
 
 @app.command()
 def init():
-    """Initialize MCPSemanticGateway data directory and configuration."""
+    """Initialize the gateway data directory and configuration."""
     from mcp_semantic_gateway.storage.init import initialize_data_dir
-    initialize_data_dir()
-    typer.echo("Initialized MCPSemanticGateway at ~/.mcp_semantic_gateway")
+    base_dir = initialize_data_dir()
+    typer.echo(f"Initialized mcp-semantic-gateway at {base_dir}")
 
 @app.command()
 def index():
@@ -48,11 +52,6 @@ def proxy():
     import asyncio
     proxy = MCPSemanticGatewayProxy()
     asyncio.run(proxy.run())
-
-@app.command()
-def search(query: str):
-    """Search for tools semantically."""
-    typer.echo(f"Searching for: {query}")
 
 if __name__ == "__main__":
     app()

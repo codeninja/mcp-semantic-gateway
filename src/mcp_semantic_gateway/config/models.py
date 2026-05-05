@@ -1,5 +1,5 @@
 from typing import Dict, List, Literal, Optional
-from pydantic import BaseModel, Field, HttpUrl, field_validator, validator
+from pydantic import BaseModel, Field, field_validator, validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from enum import Enum
 

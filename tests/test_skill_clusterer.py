@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 import pytest
 
 from mcp_semantic_gateway.ingestion.skill_clusterer import (
-    UseCaseCluster,
     cluster_use_cases,
 )
 from mcp_semantic_gateway.ingestion.use_case_miner import UseCaseRecord
@@ -119,14 +118,6 @@ def test_threshold_tuning_is_monotonic():
     d1 = _pad("desc one alpha")
     d2 = _pad("desc two beta")
     d3 = _pad("desc three gamma")
-
-    embedder = FakeEmbedder(
-        {
-            d1: [1.0, 0.0],
-            d2: [0.95, 0.3122498999199199],   # cos ~0.95 with d1
-            d3: [0.7, 0.7142136],              # cos ~0.7 with d1
-        }
-    )
 
     records = [
         _mk_record(seq=0, description=d1, linked_tools=["a"]),

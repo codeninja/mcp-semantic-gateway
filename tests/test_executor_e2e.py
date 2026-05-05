@@ -16,7 +16,6 @@ API gateway." We:
 
 from __future__ import annotations
 
-import asyncio
 import socket
 import threading
 import time

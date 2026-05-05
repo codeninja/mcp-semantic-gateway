@@ -26,7 +26,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from pydantic import BaseModel, Field
 
 # Canonical SkillPackage lives in skill_validator.py. Re-export here so
 # existing call sites (and tests) that import from skill_writer still work.

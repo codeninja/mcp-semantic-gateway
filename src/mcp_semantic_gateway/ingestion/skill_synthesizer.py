@@ -31,7 +31,6 @@ from mcp_semantic_gateway.ingestion.skill_clusterer import UseCaseCluster
 from mcp_semantic_gateway.ingestion.skill_validator import (
     SkillPackage,
     SkillReference,
-    ValidationReport,
     validate_skill,
 )
 from mcp_semantic_gateway.ingestion.skill_writer import (

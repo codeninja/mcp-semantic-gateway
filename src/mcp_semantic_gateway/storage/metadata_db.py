@@ -1,10 +1,8 @@
-import os
 import json
-import sqlite3
 import aiosqlite
 from pathlib import Path
 from typing import List, Optional, TYPE_CHECKING
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 if TYPE_CHECKING:
