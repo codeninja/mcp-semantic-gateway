@@ -92,3 +92,46 @@ class SearchCore:
 
     async def get_filtered_skills(self, tenant_id: str) -> List[dict]:
         return await self.get_filtered_items(tenant_id, "skill")
+
+    async def get_skill_by_name(self, name: str) -> Optional[dict]:
+        """Return the full skill payload for ``name``, or ``None`` if no
+        such skill is indexed.
+
+        Skills are looked up by name (since that's the handle the agent
+        already has from ``find_skills``). The SKILL.md file referenced by
+        ``annotations.path`` is read on demand and the entire body is
+        returned as ``body_markdown`` so the caller can follow the
+        skill's procedure verbatim.
+        """
+
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(
+                "SELECT name, description, annotations, server_id "
+                "FROM tools WHERE item_type = 'skill' AND name = ? LIMIT 1",
+                (name,),
+            ) as cursor:
+                row = await cursor.fetchone()
+
+        if row is None:
+            return None
+
+        skill_name, description, annotations_json, server_id = row
+        annotations: dict = (
+            json.loads(annotations_json) if annotations_json else {}
+        )
+        path_str = annotations.get("path")
+        body_markdown = ""
+        if path_str:
+            try:
+                body_markdown = Path(path_str).read_text(encoding="utf-8")
+            except OSError:
+                body_markdown = ""
+
+        return {
+            "name": skill_name,
+            "description": description,
+            "server_id": server_id,
+            "allowed_tools": annotations.get("allowed_tools", []),
+            "path": path_str,
+            "body_markdown": body_markdown,
+        }

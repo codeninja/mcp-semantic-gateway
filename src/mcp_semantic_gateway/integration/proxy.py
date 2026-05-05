@@ -27,8 +27,35 @@ _GATEWAY_TOOL_DEFS = [
     },
     {
         "name": "mcp_semantic_gateway_find_skills",
-        "description": "Search for skills",
-        "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}},
+        "description": (
+            "Search the skill catalog by free-text query. Returns matching "
+            "skills with name + frontmatter description so an agent can "
+            "decide whether to fetch the full procedure via "
+            "mcp_semantic_gateway_get_skill."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "mcp_semantic_gateway_get_skill",
+        "description": (
+            "Fetch the full SKILL.md body (procedural steps + tool list) "
+            "for a skill discovered via mcp_semantic_gateway_find_skills. "
+            "Pass the skill 'name' from the find_skills result."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Skill name from a prior find_skills result.",
+                }
+            },
+            "required": ["name"],
+        },
     },
 ]
 
