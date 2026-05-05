@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "skill_id": "enhance-pet-visibility",
+  "skill_version": 1,
+  "source": {
+    "server_id": "petstore",
+    "source_hash": "86cf75d62b3c5dddd3baab5e021c22cdf6aba6dcec1012c90ab9f6a7fa079116",
+    "source_hash_short": "86cf75d62b3c"
+  },
+  "cluster": {
+    "cluster_id": "cluster-petstore-3",
+    "cluster_hash": "f8ed56a5ee8d041ec3af21fa72e3e6a8f3a9f74f69530f063f08cffa0a23cae6",
+    "use_case_ids": [
+      "uc-petstore-pet-0-3"
+    ]
+  },
+  "tool_dependencies": [
+    "findPetsByTags",
+    "updatePet"
+  ],
+  "generation": {
+    "model": "gpt-4o-mini",
+    "prompt_version": "v1",
+    "generated_at": "2026-05-05T04:31:48Z",
+    "validation_passes": [
+      "spec-conformance",
+      "tool-grounding",
+      "length-bounds"
+    ]
+  },
+  "status": "published"
+}

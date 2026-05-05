@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "skill_id": "manage-pet-orders",
+  "skill_version": 1,
+  "source": {
+    "server_id": "petstore",
+    "source_hash": "86cf75d62b3c5dddd3baab5e021c22cdf6aba6dcec1012c90ab9f6a7fa079116",
+    "source_hash_short": "86cf75d62b3c"
+  },
+  "cluster": {
+    "cluster_id": "cluster-petstore-4",
+    "cluster_hash": "b61031194d2922cbbe9a7ed0d6783c0b7e2332d753531b21db1608d18e1efbce",
+    "use_case_ids": [
+      "uc-petstore-store-0-0"
+    ]
+  },
+  "tool_dependencies": [
+    "getInventory",
+    "placeOrder",
+    "getOrderById"
+  ],
+  "generation": {
+    "model": "gpt-4o-mini",
+    "prompt_version": "v1",
+    "generated_at": "2026-05-05T04:31:52Z",
+    "validation_passes": [
+      "spec-conformance",
+      "tool-grounding",
+      "length-bounds"
+    ]
+  },
+  "status": "published"
+}

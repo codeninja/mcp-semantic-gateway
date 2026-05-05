@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "skill_id": "handle-order-cancellation",
+  "skill_version": 1,
+  "source": {
+    "server_id": "petstore",
+    "source_hash": "86cf75d62b3c5dddd3baab5e021c22cdf6aba6dcec1012c90ab9f6a7fa079116",
+    "source_hash_short": "86cf75d62b3c"
+  },
+  "cluster": {
+    "cluster_id": "cluster-petstore-5",
+    "cluster_hash": "f3a52db9a7b48c39975e458952953c4e9904029d4a794b2d71c155a4e910e0f7",
+    "use_case_ids": [
+      "uc-petstore-store-0-1"
+    ]
+  },
+  "tool_dependencies": [
+    "getOrderById",
+    "deleteOrder"
+  ],
+  "generation": {
+    "model": "gpt-4o-mini",
+    "prompt_version": "v1",
+    "generated_at": "2026-05-05T04:31:51Z",
+    "validation_passes": [
+      "spec-conformance",
+      "tool-grounding",
+      "length-bounds"
+    ]
+  },
+  "status": "published"
+}

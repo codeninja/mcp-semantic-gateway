@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "skill_id": "petstore-authentication",
+  "skill_version": 1,
+  "source": {
+    "server_id": "petstore",
+    "source_hash": "86cf75d62b3c5dddd3baab5e021c22cdf6aba6dcec1012c90ab9f6a7fa079116",
+    "source_hash_short": "86cf75d62b3c"
+  },
+  "cluster": {
+    "cluster_id": "cluster-petstore-7",
+    "cluster_hash": "84a5585466021c5c690f647bdea3206eff59952cfd7dc9900401875323c3dba8",
+    "use_case_ids": [
+      "uc-petstore-user-0-1"
+    ]
+  },
+  "tool_dependencies": [
+    "loginUser",
+    "logoutUser"
+  ],
+  "generation": {
+    "model": "gpt-4o-mini",
+    "prompt_version": "v1",
+    "generated_at": "2026-05-05T04:31:51Z",
+    "validation_passes": [
+      "spec-conformance",
+      "tool-grounding",
+      "length-bounds"
+    ]
+  },
+  "status": "published"
+}
