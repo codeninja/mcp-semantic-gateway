@@ -19,4 +19,7 @@ docs-serve:
 docs-build:
 	uv run mkdocs build
 
-.PHONY: setup dev test lint format docs-serve docs-build
+build-and-publish:
+	rm -rf dist/ && uv build && uv publish
+
+.PHONY: setup dev test lint format docs-serve docs-build build-and-publish
