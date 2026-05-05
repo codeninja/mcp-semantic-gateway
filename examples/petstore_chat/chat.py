@@ -471,12 +471,34 @@ SYSTEM_INSTRUCTIONS = (
 )
 
 
+GREETING = (
+    "I can assist you with tasks related to a pet store, such as:\n"
+    "\n"
+    "1. Managing pets (adding, updating, deleting).\n"
+    "2. Searching for pets by status or tags.\n"
+    "3. Placing and managing orders.\n"
+    "4. Creating and managing user accounts.\n"
+    "\n"
+    "If you have a specific task in mind, just let me know!"
+)
+
+
+def _print_greeting(console: Console) -> None:
+    console.print(Markdown(GREETING))
+    console.print()
+
+
+def _seed_history() -> list[Any]:
+    return [{"role": "assistant", "content": GREETING}]
+
+
 async def _chat_loop(agent: Agent, console: Console) -> None:
-    history: list[Any] = []
+    history: list[Any] = _seed_history()
     console.print(
         "\n[dim]Multi-turn chat. /quit, /exit, or Ctrl-D to leave. "
         "/clear to reset history.[/]\n"
     )
+    _print_greeting(console)
     while True:
         try:
             user_input = console.input("[bold cyan]you ▸[/] ").strip()
@@ -488,8 +510,9 @@ async def _chat_loop(agent: Agent, console: Console) -> None:
         if user_input in {"/quit", "/exit", "/q"}:
             return
         if user_input == "/clear":
-            history = []
+            history = _seed_history()
             console.print("[dim]history cleared[/]")
+            _print_greeting(console)
             continue
 
         history.append({"role": "user", "content": user_input})

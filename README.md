@@ -1,96 +1,140 @@
-# MCP Semantic Gateway: Semantic Discovery Middleware for MCP 
+<p align="center">
+  <img src="assets/header.png" alt="mcp-semantic-gateway — Semantic Discovery Middleware for MCP" width="100%">
+</p>
 
-**Stop Bloating Your Agent's Context. Start Scaling Your Toolsets.**
+<h1 align="center">MCP Semantic Gateway</h1>
 
-MCP Semantic Gateway is an open-source, local-first middleware for the Model Context Protocol (MCP). It solves the "Too Many Tools" problem by semantically filtering your tool registry, prompts, and skills on-the-fly, ensuring your LLM stays focused, accurate, and cost-efficient.
+<p align="center">
+  <strong>One gateway. Every API. Any agent.</strong><br>
+  Plug your legacy stack, your SaaS APIs, and your MCP servers into a single
+  semantic catalog — and let agents discover the exact tools, skills, and
+  workflows they need, on demand.
+</p>
+
+<p align="center">
+  <a href="https://pypi.org/project/mcp-semantic-gateway/"><img alt="PyPI" src="https://img.shields.io/pypi/v/mcp-semantic-gateway?color=ff7a00"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache%202.0-blue"></a>
+  <a href="#"><img alt="Python" src="https://img.shields.io/badge/python-3.12%2B-3776ab"></a>
+</p>
 
 ---
 
-## 🚀 Part 1: Quick Start
+## Why this exists
 
-### What is it?
-If you have 30+ MCP tools, your agent's context window is saturated with JSON definitions before it even starts thinking. This leads to **hallucinations**, **high token costs**, and **declining accuracy**. MCP Semantic Gateway sits as a proxy between your client (Claude Code, Cursor) and your servers, serving only the tools relevant to your current task.
+Modern agents are drowning in tools. A single workspace can fan out to GitHub,
+Slack, Jira, Stripe, an internal billing API, three OpenAPI specs from your
+platform team, and a handful of MCP servers — and every one of them dumps its
+full tool list into the model's context on every turn. The result: hallucinated
+tool calls, eye-watering token bills, and a model that can't see the wood for
+the trees.
 
-### Installation
+**MCP Semantic Gateway is the one place you point everything.** Native MCP
+servers, OpenAPI/Swagger specs from your legacy backends, hand-authored
+skills, *and* skills it auto-generates from your tool catalogs — all unified
+behind a single MCP endpoint. Agents query it semantically: *"refund a
+customer's last order"* returns the three tools and the workflow that
+actually does that, not 400 unrelated definitions.
 
-**From PyPI (Recommended)**
+It's the **universal adapter** between your existing infrastructure and a modern AI stack.
+
+---
+
+## The three things it does
+
+### 1. Semantic Tool Search for MCP
+Point any MCP-speaking client at the gateway. It harvests tools from every
+upstream you configure, creates a semantic understanding of the tools, and 
+serves only the top matches for the current task. `tools/call` requests are 
+transparently routed back to the correct upstream with all authentication in 
+tact. 
+
+### 2. Auto-Generated Skills & Use Case Discovery
+Tool descriptions tell an agent *what `createOrder` does*. They don't tell it
+*how to refund a customer*. The gateway mines real-world **use cases** out of
+your tool catalogs and synthesizes agent-skills-spec `SKILL.md` workflows —
+keyed on intent, not API names. Your unfamiliar legacy API instantly looks
+like a well-documented one.
+
+### 3. Legacy API Adaptation
+Have an OpenAPI / Swagger spec? You're done. The gateway forges live MCP
+tools directly from the spec, handles auth, and (with `generate_skills =
+true`) generates a skills library on top of them. Connect a 15-year-old
+internal REST service to an LLM Driven Agent in under five minutes.
+
+---
+
+## Quick Start
+
+### Install
+
 ```bash
+# From PyPI
 pip install mcp-semantic-gateway
+
+# Or from source with uv
+gh repo clone codeninja/mcp-semantic-gateway && cd mcp-semantic-gateway
+uv sync
+```
+
+### 1. Initialize
+
+```bash
 mcp-semantic-gateway init
 ```
 
-**From Source**
-```bash
-# Clone the repository
-gh repo clone codeninja/mcp-semantic-gateway
-cd mcp-semantic-gateway
+Creates `~/.mcp_semantic_gateway/` with a starter `config.toml`.
 
-# Install dependencies and initialize
-uv sync
-uv run mcp-semantic-gateway init
-```
+### 2. Wire up your sources
 
-### 1. Configure Your Sources
-Add your MCP servers or OpenAPI specs to `~/.mcp_semantic_gateway/config.toml`:
+Edit `~/.mcp_semantic_gateway/config.toml`:
+
 ```toml
+# A native MCP server
 [servers.github]
 type = "mcp"
 command = "npx"
 args = ["@modelcontextprotocol/server-github"]
 
-[servers.weather-api]
+# A legacy REST API via its OpenAPI spec
+[servers.billing]
+type = "openapi"
+url = "https://internal.example.com/openapi.json"
+generate_skills = true            # opt in to skill synthesis
+
+# A SaaS API
+[servers.weather]
 type = "openapi"
 url = "https://api.weather.gov/openapi.json"
-```
 
-### 2. Build the Semantic Index
-MCP Semantic Gateway embeds your tool descriptions locally using `all-MiniLM-L6-v2`.
-```bash
-mcp-semantic-gateway index
-```
-
-### 2a. (Optional) Synthesize Use Cases & Skills
-For OpenAPI sources you opt into skill generation, the gateway can mine
-real-world use cases out of the harvested tools and synthesize agent-skills-spec
-SKILL.md packages so retrieval can match on workflow intent, not just tool
-names.
-
-```toml
+# (Optional) LLM provider for skill synthesis
 [llm]
-provider = "anthropic"          # or "openai-compatible"
+provider = "anthropic"            # or "openai-compatible"
 model = "claude-sonnet-4-6"
 api_key_env = "ANTHROPIC_API_KEY"
-
-[servers.petstore]
-type = "openapi"
-url = "https://petstore3.swagger.io/api/v3/openapi.yaml"
-generate_skills = true          # opt-in per server
 ```
+
+### 3. Build the index
 
 ```bash
-# Mine + cluster + synthesize
-mcp-semantic-gateway synth
-
-# Or layer a provider config without editing config.toml:
-mcp-semantic-gateway synth --config-overlay .env.openai
-
-# Add a Skill-type server entry pointing at the generated skills
-mcp-semantic-gateway synth init-skill-source
-
-# Re-index so generated skills land in the vector store
 mcp-semantic-gateway index
-
-# Inspect status
-mcp-semantic-gateway synth status
 ```
 
-Re-running `synth` against the same source with the same model + prompt
-version is a free no-op (cache hit).
+Embeddings created for every tool locally with `all-MiniLM-L6-v2`. No data leaves the device.
 
-### 3. Connect Your Agent
-Point your client to the MCP Semantic Gateway Proxy.
+### 4. (Optional) Synthesize skills
 
-**For PyPI Installation (Claude Desktop):**
+```bash
+mcp-semantic-gateway synth                  # mine + cluster + generate
+mcp-semantic-gateway synth init-skill-source # register the generated skills
+mcp-semantic-gateway index                   # re-index so they're searchable
+```
+
+Re-runs against unchanged inputs are free — the cache eats them.
+
+### 5. Connect your agent
+
+**Claude Desktop / Code / any MCP client:**
+
 ```json
 "mcpServers": {
   "mcp-semantic-gateway": {
@@ -100,83 +144,177 @@ Point your client to the MCP Semantic Gateway Proxy.
 }
 ```
 
-**For Source Installation (Claude Desktop):**
-```json
-"mcpServers": {
-  "mcp-semantic-gateway": {
-    "command": "uv",
-    "args": ["--directory", "/path/to/mcp-semantic-gateway", "run", "mcp-semantic-gateway", "proxy"]
-  }
-}
-```
-
-### 4. Use It
-Simply tell your agent what you're doing. The agent will call `mcp_semantic_gateway_context("debugging kubernetes logs")`, and MCP Semantic Gateway will instantly activate the relevant tools in the agent's registry.
+That's it. Your agent now has four tools — `mcp_semantic_gateway_context`,
+`find_prompts`, `find_skills`, `get_skill` — and a couple hundred upstream
+tools waiting in the wings, ready to be summoned by intent.
 
 ---
 
-## 🧠 Part 2: Technical Architecture
+## See it in action: the Petstore demo
 
-MCP Semantic Gateway operates as a **Statistical Filtering Proxy**. It doesn't just forward requests; it transforms the environment based on intent.
+The repo ships with a full end-to-end showcase under [`examples/petstore_chat/`](examples/petstore_chat/):
 
-### How it Works:
-1.  **Ingestion**: The `Collector` harvests tools from native MCP servers, "forges" new tools from OpenAPI/Swagger docs, and indexes local Agent Skills (`SKILL.md`).
-2.  **Semantic Index**: A local SQLite + hnswlib vector store maintains embeddings for every tool, prompt, and skill.
-3.  **The Discovery Loop**:
-    *   The Agent sets a context via `mcp_semantic_gateway_context`.
-    *   MCP Semantic Gateway intercepts the next `tools/list` or `prompts/list` request.
-    *   It performs a sub-millisecond k-NN search and returns only the top-k matches.
-    *   `tools/call` requests are transparently routed back to the correct upstream server.
+- A **legacy-style FastAPI petstore backend** with a 19-operation OpenAPI surface.
+- A **chat CLI** that boots the backend, fires up the gateway, generates skills,
+  and drops you into an interactive agent that can manage the shop.
+- Live MCP event stream rendered in the terminal so you can watch every
+  `tools/list`, `find_skills`, and `tools/call` go by.
 
-### How the Use-Case & Skill Engine Works
-
-Naked tool descriptions are great for `findPetsByStatus`-style queries but terrible at workflow intent ("clean up old orders"). Opt a source into `generate_skills = true` and the gateway runs an offline **synthesis pipeline** that turns harvested tools into discoverable, agent-readable workflows. The pipeline is invoked with `mcp-semantic-gateway synth` and works in five stages:
-
-```
-harvest ──► chunk ──► mine use cases ──► cluster ──► synthesize skills
-                                              │
-                                              ▼
-                       .mcp_semantic_gateway/skills/<server>/<src_hash>/<id>/v1/
-                                              │
-                                       (next index pass)
-                                              ▼
-                                    semantic vector store
+```bash
+export OPENAI_API_KEY=sk-...
+uv sync --dev
+python examples/petstore_chat/chat.py --generate-skills
 ```
 
-1.  **Chunking** (`ingestion/chunker.py`) — Harvested tools are grouped to fit an LLM call cleanly. OpenAPI sources prefer operation `tags` (decision U-4), then path-prefix (`/users/...`), then ordered fixed-size. Live MCP sources prefer shared name-prefixes (`gh_`, `slack_`). Each chunk gets a deterministic `chunk_id` and `chunk_hash` so re-runs are byte-stable.
-2.  **Use-case mining** (`ingestion/use_case_miner.py`) — One LLM call per chunk via the provider abstraction in `llm/` (Anthropic native or OpenAI-compatible: OpenAI, OpenRouter, Gemini, Ollama, vLLM). Structured output is forced through a single `emit_use_cases` tool — no JSON repair, no freeform parsing. Each emitted record is then **deterministically validated**: description length 50–400 chars, every `linked_tool_names` entry must resolve in the chunk, confidence in `[0, 1]`. Hallucinated tool names are dropped before they reach disk and emitted as `record_rejected` events.
-3.  **Caching** (decision U-7) — Cache key is `(server_id, source_hash, chunk_hash, model_id, prompt_version)`. A re-run on unchanged inputs makes **zero LLM calls**. Bumping `prompt_version` invalidates per-chunk cache; bumping the source bumps everything downstream. Use cases land in a dedicated `use_cases` SQLite table for richer provenance.
-4.  **Clustering** (`ingestion/skill_clusterer.py`) — Use-case descriptions are embedded with the same `LocalEmbedder` the index already uses, then greedy-agglomerative-clustered by cosine similarity (default threshold `0.78`). Each cluster's medoid description becomes its representative; `cluster_hash` is sha256 of sorted member hashes.
-5.  **Skill synthesis** (`ingestion/skill_synthesizer.py`) — One LLM call per cluster via a forced `emit_skill_package` tool. The output is a structured `SkillPackage`: `name`, `description`, `body_markdown`, `tool_dependencies`, optional `references`. Three deterministic passes gate publication (`ingestion/skill_validator.py`):
-    *   **spec-conformance**: name matches `^[a-z][a-z0-9-]{1,63}$`; description in length bounds.
-    *   **tool-grounding**: every name in `tool_dependencies` resolves in the harvested catalog (the dominant LLM hallucination path); body backticks are advisory and only flag obvious tool shapes (length ≥ 8 + underscore) so parameter names like `petId` aren't false-positives.
-    *   **length-bounds**: body and per-reference lengths in range.
-6.  **Atomic write** (`ingestion/skill_writer.py`) — Skills land at `.mcp_semantic_gateway/skills/<server_id>/<source_hash[:12]>/<skill-id>/v1/SKILL.md` (agent-skills-spec-conformant frontmatter + procedural body) plus a `.meta.json` sidecar. Writes go through `tmp + os.replace` so a half-written file can never be observed by the collector. Same `cluster_hash` → idempotent rewrite at the same slot; different cluster → numeric-suffix collision (`<id>-2`, `<id>-3`).
+```
+you ▸ onboard a new pet named Rex and put him up for sale
+[12:04:01] → MCP tools/call  mcp_semantic_gateway_find_skills({"query": "onboard a pet"})
+[12:04:01] ← 1 skill: manage-petstore-inventory
+[12:04:02] → MCP tools/call  mcp_semantic_gateway_get_skill({"name": "manage-petstore-inventory"})
+[12:04:03] → MCP tools/call  createPet({"name": "Rex", "status": "available"})
+...
+```
 
-The `Collector.collect_skills()` path discovers the generated `SKILL.md` files on the next `mcp-semantic-gateway index` pass — no retrieval-side changes required. From the agent's perspective, generated skills look identical to hand-authored ones in the vector store, but they're keyed on workflow intent ("triage stale issues", "onboard a pet") rather than mechanical tool names.
+The agent has *zero* prior knowledge of the petstore API. It discovers the
+right skill, reads the procedure, calls the legacy backend's tools, and gets
+the job done — purely through the gateway.
 
-**Observability** (`ingestion/observability.py`) — Every stage emits a structured event to `~/.mcp_semantic_gateway/logs/synthesis.jsonl`. Failures and rejected records produce per-chunk diagnostics under `.mcp_semantic_gateway/diagnostics/synthesis/<run_id>/`. The CLI prints a Rich-rendered run summary with token counts, cache hits, rejection breakdowns, and per-source cost (when the provider reports it).
-
-**Deep Dive**: full design lives in [docs/design/use-case-synthesis.md](docs/design/use-case-synthesis.md) and [docs/design/skill-generation.md](docs/design/skill-generation.md). For the layered architecture, domain models, and state machines, see the [Full Technical Specification](docs/specs/SPEC.md).
+See [`examples/petstore_chat/README.md`](examples/petstore_chat/README.md) for
+the full breakdown, including how to run it against Ollama, OpenRouter, vLLM,
+or any other OpenAI-compatible endpoint.
 
 ---
 
-## 🤝 Part 3: Contributing
+## How skill & use case discovery works
 
-We are building the "Garbage Collector for the Context Window," and we want your help!
+> *Tool names are bad search keys. Workflows are good search keys.*
 
-### How to Contribute
-- **Create a Bridge**: Have a niche API? Add an example to `/examples` showing how to bridge it.
-- **Improve the Forge**: Help us refine the OpenAPI-to-MCP transformation logic.
-- **New Backends**: We want to support more vector stores (Chroma, pgvector) and remote embedding providers.
-- **Feedback**: Open an issue if you find a tool-selection hallucination we can't solve.
+When you set `generate_skills = true` on a source and run
+`mcp-semantic-gateway synth`, the gateway runs an offline pipeline that turns
+your raw tool catalog into a library of discoverable workflows.
 
-### Development Workflow
-1.  Fork the repo.
-2.  Create a feature branch: `feat/issue-number-description`.
-3.  Run the E2E suite: `uv run pytest tests/test_e2e.py`.
-4.  Submit a PR!
+```
+  harvest ──► chunk ──► mine use cases ──► cluster ──► synthesize SKILL.md
+     │                       │                                    │
+     │                       │  one LLM call per chunk            │
+     │                       │  structured output, validated      │
+     │                                                            │
+     └─ tools from MCP /                              one SKILL.md per cluster,
+        OpenAPI / Swagger                             grounded in real tool names
+```
+
+**1. Mine.** Each chunk of tools is handed to an LLM that emits candidate
+*use cases* — short statements like *"refund a customer's most recent
+order"* — each linked to the specific tools that implement it. Hallucinated
+tool names are deterministically rejected before they hit disk.
+
+**2. Cluster.** Use case descriptions are embedded and clustered by cosine
+similarity. Related intents collapse into a single concept; the medoid
+becomes the cluster's representative.
+
+**3. Synthesize.** Each cluster gets one LLM call that produces a full
+`SKILL.md` package — a name, a description, a procedural body, and the exact
+list of tool dependencies. Three validation passes (spec conformance, tool
+grounding, length bounds) gate publication.
+
+**4. Index.** Generated skills land at
+`~/.mcp_semantic_gateway/skills/<server>/<hash>/<id>/v1/SKILL.md` and join
+hand-authored skills in the vector store on the next index pass.
+
+**5. Cache.** The cache key is `(server, source_hash, chunk_hash, model,
+prompt_version)`. Re-running synth against unchanged inputs is a zero-cost
+no-op. Bump the prompt version and only the affected chunks re-run.
+
+From the agent's perspective, the result is a library of workflows keyed on
+intent. *"Triage stale issues"*, *"onboard a new pet"*, *"close out yesterday's
+orders"* — the kinds of things humans actually ask agents to do. The agent
+calls `find_skills` to discover candidates, `get_skill` to read the
+procedure, and is then equipped with both the *what* and the *how* before it
+touches a single upstream tool.
+
+Full design notes live in
+[docs/design/use-case-synthesis.md](docs/design/use-case-synthesis.md) and
+[docs/design/skill-generation.md](docs/design/skill-generation.md).
 
 ---
 
-*Built by [codeninja](https://github.com/codeninja) and a Custom Agentic Development Engine*
+## CLI reference
+
+| Command | What it does |
+|---|---|
+| `mcp-semantic-gateway init` | Scaffold `~/.mcp_semantic_gateway/` with a starter config. |
+| `mcp-semantic-gateway index` | (Re-)embed every tool, prompt, and skill into the local vector store. |
+| `mcp-semantic-gateway proxy` | Run the stdio MCP server. This is what your agent connects to. |
+| `mcp-semantic-gateway server` | Run as an HTTP server (for remote clients). |
+| `mcp-semantic-gateway search "<query>"` | Sanity-check what the gateway would return for a given query. |
+| `mcp-semantic-gateway synth` | Mine use cases + cluster + synthesize `SKILL.md` packages for opted-in OpenAPI sources. |
+| `mcp-semantic-gateway synth status` | Show last-run summary, cache hits, token spend, rejections. |
+| `mcp-semantic-gateway synth init-skill-source` | Register generated skills as a `type = "skill"` source in your config. |
+
+---
+
+## Architecture at a glance
+
+```
+   ┌─────────────────────────────────────────────────────────────┐
+   │                      Your agent                             │
+   │     (Claude Desktop / Claude Code / Cursor / custom)        │
+   └───────────────────────────┬─────────────────────────────────┘
+                               │  stdio MCP
+                               ▼
+   ┌─────────────────────────────────────────────────────────────┐
+   │              MCP Semantic Gateway proxy                     │
+   │  ┌──────────┐   ┌───────────────────┐   ┌────────────────┐  │
+   │  │ Registry │   │  Semantic search  │   │   Router       │  │
+   │  │  (SQLite)│   │  (hnswlib + MiniLM│   │  tools/call →  │  │
+   │  │          │   │   embeddings)     │   │  upstream      │  │
+   │  └──────────┘   └───────────────────┘   └────────────────┘  │
+   └─────────┬────────────────────────────────────┬──────────────┘
+             │                                    │
+   ┌─────────▼─────────┐  ┌─────────────────┐  ┌──▼──────────────┐
+   │  Native MCP       │  │  OpenAPI /      │  │  Skill packages │
+   │  servers          │  │  Swagger specs  │  │  (auto-generated│
+   │  (github, slack…) │  │  (legacy APIs)  │  │ + hand-authored)│
+   └───────────────────┘  └─────────────────┘  └─────────────────┘
+```
+
+- **Local-first.** Embeddings run on-box. No telemetry. No cloud dependency
+  unless *you* point it at one for skill synthesis.
+- **Pluggable LLMs.** Anthropic native, or any OpenAI-compatible endpoint —
+  OpenAI, OpenRouter, Gemini, Ollama, vLLM.
+- **Observable.** Every synthesis stage emits structured JSONL events;
+  failures and rejections write per-run diagnostics you can grep.
+
+For the layered architecture, domain models, and state machines, see the
+[Full Technical Specification](docs/specs/SPEC.md).
+
+---
+
+## Contributing
+
+We're building the universal adapter between every API on earth and every
+agent on earth. Help wanted:
+
+- **Bridge a niche API.** Drop an example into `/examples` showing how you
+  wired up your stack.
+- **Improve the forge.** Help refine the OpenAPI → MCP transformation logic.
+- **New backends.** Chroma, pgvector, remote embedding providers — all open.
+- **Tell us where it hallucinates.** Open an issue with the query and the
+  catalog and we'll fix the retrieval.
+
+```bash
+# Fork, branch, hack
+git checkout -b feat/your-thing
+
+# Run the E2E suite
+uv run pytest tests/test_e2e.py
+
+# PR it
+```
+
+---
+
+<p align="center">
+  <em>Built by <a href="https://github.com/codeninja">codeninja</a> and a custom agentic development engine.</em><br>
+  <em>Apache 2.0 — go build something.</em>
+</p>
