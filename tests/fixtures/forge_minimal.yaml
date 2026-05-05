@@ -1,0 +1,87 @@
+openapi: 3.0.0
+info:
+  title: Forge Test API
+  version: "1.0.0"
+servers:
+  - url: https://api.example.com/v1
+paths:
+  /users/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getUser
+      summary: Fetch a user.
+      parameters:
+        - name: include
+          in: query
+          required: false
+          description: Optional related resources to side-load.
+          schema:
+            type: array
+            items:
+              type: string
+          explode: true
+        - $ref: "#/components/parameters/TraceId"
+      security:
+        - api_key: []
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+    put:
+      operationId: updateUser
+      description: Replace a user record.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/User"
+      responses:
+        "200":
+          description: ok
+      servers:
+        - url: https://users.api.example.com/v2
+  /search:
+    get:
+      operationId: search
+      summary: Free-text search.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ok
+components:
+  parameters:
+    TraceId:
+      name: X-Trace-Id
+      in: header
+      required: false
+      schema:
+        type: string
+  schemas:
+    User:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        age:
+          type: integer
+  securitySchemes:
+    api_key:
+      type: apiKey
+      in: header
+      name: X-API-Key

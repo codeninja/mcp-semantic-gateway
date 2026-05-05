@@ -60,6 +60,11 @@ class MCPClient:
         self.server_id = server_id
         self.config = config
         self.process: Optional[asyncio.subprocess.Process] = None
+        # Serialize stdin writes + stdout reads. The MCP stdio protocol is
+        # single-stream JSON-RPC: two coroutines reading the same stdout
+        # would race for response lines and deliver them to the wrong
+        # caller. The lock guards every method that touches the pipes.
+        self._io_lock = asyncio.Lock()
 
     async def start(self):
         env = os.environ.copy()
@@ -84,71 +89,103 @@ class MCPClient:
     async def call_tools_list(self) -> List[dict]:
         if not self.process or not self.process.stdin or not self.process.stdout:
             raise RuntimeError("Server not started")
-            
-        # 1. Initialize
-        init_req = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {"name": "MCPSemanticGateway", "version": "1.0.0"}
+
+        async with self._io_lock:
+            # 1. Initialize
+            init_req = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "MCPSemanticGateway", "version": "1.0.0"}
+                }
             }
-        }
-        self.process.stdin.write((json.dumps(init_req) + "\n").encode())
-        await self.process.stdin.drain()
-        
-        line = await self.process.stdout.readline()
-        
-        # 2. List tools
-        list_req = {
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/list",
-            "params": {}
-        }
-        self.process.stdin.write((json.dumps(list_req) + "\n").encode())
-        await self.process.stdin.drain()
-        
-        tools = []
-        while True:
+            self.process.stdin.write((json.dumps(init_req) + "\n").encode())
+            await self.process.stdin.drain()
+
             line = await self.process.stdout.readline()
-            if not line: break
-            resp = json.loads(line)
-            if resp.get("id") == 2:
-                result = resp.get("result", {})
-                tools.extend(result.get("tools", []))
-                cursor = result.get("nextCursor")
-                if not cursor:
-                    break
-            else:
-                pass
+
+            # 2. List tools
+            list_req = {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/list",
+                "params": {}
+            }
+            self.process.stdin.write((json.dumps(list_req) + "\n").encode())
+            await self.process.stdin.drain()
+
+            tools = []
+            while True:
+                line = await self.process.stdout.readline()
+                if not line: break
+                resp = json.loads(line)
+                if resp.get("id") == 2:
+                    result = resp.get("result", {})
+                    tools.extend(result.get("tools", []))
+                    cursor = result.get("nextCursor")
+                    if not cursor:
+                        break
+                else:
+                    pass
         return tools
+
+    async def call_tool(self, name: str, arguments: dict, *, request_id: int = 1000) -> dict:
+        """Forward a single ``tools/call`` to the upstream MCP server and
+        return its raw JSON-RPC ``result`` (or ``error``) payload.
+
+        Calls are serialized via :attr:`_io_lock`; concurrent invocations on
+        the same client wait their turn rather than racing on stdout. A
+        future improvement could multiplex on request id with a single
+        background reader task.
+        """
+
+        if not self.process or not self.process.stdin or not self.process.stdout:
+            raise RuntimeError("Server not started")
+
+        req = {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "tools/call",
+            "params": {"name": name, "arguments": arguments},
+        }
+        async with self._io_lock:
+            self.process.stdin.write((json.dumps(req) + "\n").encode())
+            await self.process.stdin.drain()
+            while True:
+                line = await self.process.stdout.readline()
+                if not line:
+                    raise RuntimeError(f"Upstream MCP server {self.server_id!r} closed stdout")
+                resp = json.loads(line)
+                if resp.get("id") == request_id:
+                    return resp
 
     async def call_prompts_list(self) -> List[dict]:
         if not self.process or not self.process.stdin or not self.process.stdout:
             raise RuntimeError("Server not started")
-            
-        list_req = {
-            "jsonrpc": "2.0",
-            "id": 102,
-            "method": "prompts/list",
-            "params": {}
-        }
-        self.process.stdin.write((json.dumps(list_req) + "\n").encode())
-        await self.process.stdin.drain()
-        
-        prompts = []
-        while True:
-            line = await self.process.stdout.readline()
-            if not line: break
-            resp = json.loads(line)
-            if resp.get("id") == 102:
-                result = resp.get("result", {})
-                prompts.extend(result.get("prompts", []))
-                if not result.get("nextCursor"):
-                    break
+
+        async with self._io_lock:
+            list_req = {
+                "jsonrpc": "2.0",
+                "id": 102,
+                "method": "prompts/list",
+                "params": {}
+            }
+            self.process.stdin.write((json.dumps(list_req) + "\n").encode())
+            await self.process.stdin.drain()
+
+            prompts = []
+            while True:
+                line = await self.process.stdout.readline()
+                if not line: break
+                resp = json.loads(line)
+                if resp.get("id") == 102:
+                    result = resp.get("result", {})
+                    prompts.extend(result.get("prompts", []))
+                    if not result.get("nextCursor"):
+                        break
         return prompts
 
 class Collector:

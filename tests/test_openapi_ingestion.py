@@ -77,10 +77,16 @@ async def test_openapi_ingestion(openapi_server):
     list_users = next(t for t in tools if t["name"] == "listUsers")
     assert list_users["description"] == "Returns a list of users"
     assert "limit" in list_users["inputSchema"]["properties"]
-    
+
     # Check createUser
     create_user = next(t for t in tools if t["name"] == "createUser")
     assert "name" in create_user["inputSchema"]["properties"]
     assert "name" in create_user["inputSchema"]["required"]
-    
+
+    # Route metadata must survive the full Collector path (forge -> harvested).
+    assert list_users["_route_metadata"]["method"] == "GET"
+    assert list_users["_route_metadata"]["path_template"] == "/users"
+    assert create_user["_route_metadata"]["method"] == "POST"
+    assert create_user["_route_metadata"]["request_body"]["content_type"] == "application/json"
+
     print("\n[SUCCESS] OpenAPI ingestion test passed.")

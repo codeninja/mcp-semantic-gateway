@@ -11,6 +11,12 @@ if TYPE_CHECKING:
     from mcp_semantic_gateway.ingestion.chunker import ToolChunk
     from mcp_semantic_gateway.ingestion.use_case_miner import UseCaseRecord
 
+
+# Conservative bound-parameter chunk size for ``WHERE tool_id IN (?, ?, ...)``
+# queries. SQLite's default ``SQLITE_MAX_VARIABLE_NUMBER`` was 999 before
+# 3.32 and 32766 since; 500 is safely under both.
+_SQLITE_PARAM_BATCH = 500
+
 @dataclass
 class ToolRecord:
     tool_id: str
@@ -25,6 +31,10 @@ class ToolRecord:
     indexed_at: str = ""
     index_version: int = 0
     item_type: str = "tool"
+    # Structured execution metadata for OpenAPI-sourced tools (method, path,
+    # parameter locations, body schema, security, server overrides). NULL for
+    # native MCP tools, skills, or prompts.
+    route_metadata: Optional[dict] = None
 
 class MetadataDB:
     def __init__(self, db_path: Path):
@@ -59,9 +69,23 @@ class MetadataDB:
                     indexed_at TEXT,
                     index_version INTEGER,
                     item_type TEXT DEFAULT 'tool',
+                    route_metadata TEXT,
                     FOREIGN KEY(server_id) REFERENCES servers(server_id)
                 )
             """)
+            # Migrate older databases that predate route_metadata.
+            cursor = await db.execute("PRAGMA table_info(tools)")
+            existing_cols = {row[1] for row in await cursor.fetchall()}
+            if "route_metadata" not in existing_cols:
+                await db.execute("ALTER TABLE tools ADD COLUMN route_metadata TEXT")
+            # Lookup index for the executor's tool_name -> route_metadata path.
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tools_name ON tools(name)"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tools_server_name "
+                "ON tools(server_id, name)"
+            )
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS index_versions (
                     server_id TEXT PRIMARY KEY,
@@ -104,20 +128,83 @@ class MetadataDB:
             """)
             await db.commit()
 
+    async def list_tool_summaries(self) -> List[tuple]:
+        """Return ``(tool_id, server_id, name, item_type)`` for every row in
+        ``tools``. Used by the registry to compute canonical names in memory.
+        """
+
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "SELECT tool_id, server_id, name, item_type FROM tools "
+                "ORDER BY server_id, name"
+            )
+            rows = await cursor.fetchall()
+        return [tuple(r) for r in rows]
+
+    async def list_tools_by_ids(self, tool_ids: List[str]) -> List[ToolRecord]:
+        """Hydrate many ``ToolRecord``s in batched bulk queries.
+
+        Used by ``ToolRegistry.list_handles`` to avoid the N+1 connection
+        pattern of calling :meth:`get_tool_by_id` in a loop. Batches IDs
+        under SQLite's bound-parameter limit (default 999 in older SQLite,
+        higher in newer; we cap at a safe 500) so very large registries
+        don't trip ``too many SQL variables``.
+        """
+
+        if not tool_ids:
+            return []
+        results: List[ToolRecord] = []
+        async with aiosqlite.connect(self.db_path) as db:
+            for i in range(0, len(tool_ids), _SQLITE_PARAM_BATCH):
+                chunk = tool_ids[i:i + _SQLITE_PARAM_BATCH]
+                placeholders = ",".join("?" for _ in chunk)
+                sql = (
+                    "SELECT tool_id, server_id, name, title, description, "
+                    "input_schema, output_schema, annotations, embedding_text, "
+                    "indexed_at, index_version, item_type, route_metadata "
+                    f"FROM tools WHERE tool_id IN ({placeholders})"
+                )
+                cursor = await db.execute(sql, chunk)
+                rows = await cursor.fetchall()
+                results.extend(_row_to_tool_record(r) for r in rows)
+        return results
+
+    async def get_tool_by_id(self, tool_id: str) -> Optional[ToolRecord]:
+        """Hydrate a full ``ToolRecord`` from the primary key."""
+
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                """
+                SELECT tool_id, server_id, name, title, description,
+                       input_schema, output_schema, annotations,
+                       embedding_text, indexed_at, index_version, item_type,
+                       route_metadata
+                FROM tools
+                WHERE tool_id = ?
+                """,
+                (tool_id,),
+            )
+            row = await cursor.fetchone()
+        if not row:
+            return None
+        return _row_to_tool_record(row)
+
     async def save_tool(self, tool: ToolRecord):
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("""
                 INSERT OR REPLACE INTO tools (
                     tool_id, server_id, name, title, description,
                     input_schema, output_schema, annotations,
-                    embedding_text, indexed_at, index_version, item_type
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    embedding_text, indexed_at, index_version, item_type,
+                    route_metadata
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 tool.tool_id, tool.server_id, tool.name, tool.title, tool.description,
                 json.dumps(tool.input_schema) if tool.input_schema else None,
                 json.dumps(tool.output_schema) if tool.output_schema else None,
                 json.dumps(tool.annotations) if tool.annotations else None,
-                tool.embedding_text, tool.indexed_at, tool.index_version, tool.item_type
+                tool.embedding_text, tool.indexed_at, tool.index_version, tool.item_type,
+                json.dumps(tool.route_metadata) if tool.route_metadata else None,
             ))
             await db.commit()
 
@@ -262,6 +349,29 @@ class MetadataDB:
         return (
             await self.use_case_count_for_source(server_id, source_hash) > 0
         )
+
+
+def _row_to_tool_record(row) -> ToolRecord:
+    """Hydrate a SQLite row into a ``ToolRecord``. Column order must match
+    the SELECT clauses in :meth:`MetadataDB.get_tool_by_id` and
+    :meth:`MetadataDB.list_tools_by_ids`.
+    """
+
+    return ToolRecord(
+        tool_id=row[0],
+        server_id=row[1],
+        name=row[2],
+        title=row[3],
+        description=row[4],
+        input_schema=json.loads(row[5]) if row[5] else None,
+        output_schema=json.loads(row[6]) if row[6] else None,
+        annotations=json.loads(row[7]) if row[7] else None,
+        embedding_text=row[8] or "",
+        indexed_at=row[9] or "",
+        index_version=int(row[10]) if row[10] is not None else 0,
+        item_type=row[11] or "tool",
+        route_metadata=json.loads(row[12]) if row[12] else None,
+    )
 
 
 def _row_to_use_case(row, UseCaseRecord):

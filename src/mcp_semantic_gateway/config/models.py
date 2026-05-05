@@ -21,6 +21,79 @@ class SourceType(str, Enum):
     OPENAPI = "openapi"
     SKILL = "skill"
 
+
+class AuthType(str, Enum):
+    NONE = "none"
+    API_KEY = "api_key"
+    BEARER = "bearer"
+    BASIC = "basic"
+
+
+class AuthConfig(BaseModel):
+    """Outbound auth applied by the OpenAPI executor when calling the upstream API.
+
+    Secrets are never stored — only the names of environment variables that hold
+    them. The executor reads them at request time.
+    """
+
+    type: AuthType = AuthType.NONE
+
+    # api_key: exactly one of header_name or query_name must be set.
+    header_name: Optional[str] = None
+    query_name: Optional[str] = None
+    api_key_env: Optional[str] = None
+
+    # bearer
+    bearer_token_env: Optional[str] = None
+
+    # basic
+    basic_username_env: Optional[str] = None
+    basic_password_env: Optional[str] = None
+
+    @field_validator("api_key_env", "bearer_token_env", "basic_username_env", "basic_password_env")
+    @classmethod
+    def _no_empty_env(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and not v.strip():
+            raise ValueError("env var name must be non-empty")
+        return v
+
+    @field_validator("header_name", "query_name")
+    @classmethod
+    def _strip_and_reject_empty_key(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError(
+                "header_name / query_name must be non-empty and non-whitespace"
+            )
+        return stripped
+
+    @field_validator("type")
+    @classmethod
+    def _validate_required_fields(cls, v: AuthType, info) -> AuthType:
+        # Field-level validation runs in declaration order; cross-field checks
+        # belong on a model_validator. We only normalize here.
+        return v
+
+    def model_post_init(self, __context) -> None:
+        if self.type == AuthType.API_KEY:
+            if not self.api_key_env:
+                raise ValueError("auth.type=api_key requires api_key_env")
+            if bool(self.header_name) == bool(self.query_name):
+                raise ValueError(
+                    "auth.type=api_key requires exactly one of header_name or query_name"
+                )
+        elif self.type == AuthType.BEARER:
+            if not self.bearer_token_env:
+                raise ValueError("auth.type=bearer requires bearer_token_env")
+        elif self.type == AuthType.BASIC:
+            if not (self.basic_username_env and self.basic_password_env):
+                raise ValueError(
+                    "auth.type=basic requires basic_username_env and basic_password_env"
+                )
+
+
 class ServerConfig(BaseModel):
     type: SourceType = SourceType.MCP
     command: Optional[str] = None
@@ -32,6 +105,12 @@ class ServerConfig(BaseModel):
     tags: List[str] = Field(default_factory=list)
     display_name: Optional[str] = None
     generate_skills: bool = False
+    # Outbound auth for OpenAPI sources. Ignored for other source types.
+    auth: Optional[AuthConfig] = None
+    # Optional override for the upstream base URL. If absent, the executor
+    # uses the operation/spec ``servers`` block and surfaces an error if
+    # neither is set.
+    base_url: Optional[str] = None
 
 class RetrievalConfig(BaseModel):
     top_k: int = Field(default=10, ge=1, le=100)

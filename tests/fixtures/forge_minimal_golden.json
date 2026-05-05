@@ -1,0 +1,230 @@
+[
+  {
+    "_route_metadata": {
+      "method": "GET",
+      "operation_id": "getUser",
+      "parameters": [
+        {
+          "description": null,
+          "explode": null,
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": null
+        },
+        {
+          "description": "Optional related resources to side-load.",
+          "explode": true,
+          "in": "query",
+          "name": "include",
+          "required": false,
+          "schema": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "style": null
+        },
+        {
+          "description": null,
+          "explode": null,
+          "in": "header",
+          "name": "X-Trace-Id",
+          "required": false,
+          "schema": {
+            "type": "string"
+          },
+          "style": null
+        }
+      ],
+      "path_template": "/users/{id}",
+      "request_body": null,
+      "security": [
+        {
+          "api_key": []
+        }
+      ],
+      "servers": [
+        "https://api.example.com/v1"
+      ],
+      "success_response": {
+        "content_type": "application/json",
+        "schema": {
+          "properties": {
+            "age": {
+              "type": "integer"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "type": "object"
+        },
+        "status": "200"
+      },
+      "tags": []
+    },
+    "annotations": {
+      "method": "GET",
+      "path": "/users/{id}",
+      "source": "openapi",
+      "tags": []
+    },
+    "description": "Fetch a user.",
+    "inputSchema": {
+      "properties": {
+        "X-Trace-Id": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "include": {
+          "description": "Optional related resources to side-load.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "name": "getUser"
+  },
+  {
+    "_route_metadata": {
+      "method": "PUT",
+      "operation_id": "updateUser",
+      "parameters": [
+        {
+          "description": null,
+          "explode": null,
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": null
+        }
+      ],
+      "path_template": "/users/{id}",
+      "request_body": {
+        "content_type": "application/json",
+        "description": null,
+        "input_style": "inline",
+        "required": true,
+        "schema": {
+          "properties": {
+            "age": {
+              "type": "integer"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "type": "object"
+        }
+      },
+      "security": [],
+      "servers": [
+        "https://users.api.example.com/v2"
+      ],
+      "success_response": {
+        "content_type": null,
+        "schema": null,
+        "status": "200"
+      },
+      "tags": []
+    },
+    "annotations": {
+      "method": "PUT",
+      "path": "/users/{id}",
+      "source": "openapi",
+      "tags": []
+    },
+    "description": "Replace a user record.",
+    "inputSchema": {
+      "properties": {
+        "age": {
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "type": "object"
+    },
+    "name": "updateUser"
+  },
+  {
+    "_route_metadata": {
+      "method": "GET",
+      "operation_id": "search",
+      "parameters": [
+        {
+          "description": null,
+          "explode": null,
+          "in": "query",
+          "name": "q",
+          "required": true,
+          "schema": {
+            "type": "string"
+          },
+          "style": null
+        }
+      ],
+      "path_template": "/search",
+      "request_body": null,
+      "security": [],
+      "servers": [
+        "https://api.example.com/v1"
+      ],
+      "success_response": {
+        "content_type": null,
+        "schema": null,
+        "status": "200"
+      },
+      "tags": []
+    },
+    "annotations": {
+      "method": "GET",
+      "path": "/search",
+      "source": "openapi",
+      "tags": []
+    },
+    "description": "Free-text search.",
+    "inputSchema": {
+      "properties": {
+        "q": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "q"
+      ],
+      "type": "object"
+    },
+    "name": "search"
+  }
+]

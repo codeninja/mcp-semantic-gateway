@@ -4,6 +4,9 @@ from sse_starlette.sse import EventSourceResponse
 from mcp_semantic_gateway.config.loader import load_config
 from mcp_semantic_gateway.storage.init import initialize_data_dir
 from mcp_semantic_gateway.retrieval.core import SearchCore
+from mcp_semantic_gateway.retrieval.registry import ToolRegistry
+from mcp_semantic_gateway.integration.openapi_executor import OpenAPIExecutor
+from mcp_semantic_gateway.integration.router import ToolRouter, ToolNotFound
 from pathlib import Path
 from typing import Optional, Dict, List
 import asyncio
@@ -12,7 +15,26 @@ import json
 app = FastAPI(title="MCPSemanticGateway HTTP Server")
 config = load_config()
 base_dir = initialize_data_dir()
-core = SearchCore(config, base_dir)
+registry = ToolRegistry(
+    base_dir / "index" / "metadata.db",
+    force_namespace=config.proxy.namespace_collisions,
+)
+core = SearchCore(config, base_dir, registry=registry)
+openapi_executor = OpenAPIExecutor(config)
+# The HTTP server has no native MCP child processes; native MCP routing
+# only applies to the stdio proxy. Calls to native MCP tools through this
+# transport surface as "no upstream" errors via the router.
+router = ToolRouter(config, registry, openapi_executor, core, mcp_clients={})
+
+
+@app.on_event("startup")
+async def _initialize_registry() -> None:
+    await registry.initialize()
+
+
+@app.on_event("shutdown")
+async def _shutdown() -> None:
+    await openapi_executor.aclose()
 
 app.add_middleware(
     CORSMiddleware,
@@ -105,17 +127,15 @@ async def message_endpoint(
     if method == "tools/call":
         name = body["params"]["name"]
         args = body["params"].get("arguments", {})
-        if name == "mcp_semantic_gateway_find_prompts":
-            query = args.get("query", "")
-            # Temporarily override context for this search
-            core.set_context(f"{x_tenant_id}_search", query, ttl=10)
-            items = await core.get_filtered_prompts(f"{x_tenant_id}_search")
-            return {"jsonrpc": "2.0", "id": body["id"], "result": {"content": [{"type": "text", "text": json.dumps(items, indent=2)}]}}
-        if name == "mcp_semantic_gateway_find_skills":
-            query = args.get("query", "")
-            core.set_context(f"{x_tenant_id}_search", query, ttl=10)
-            items = await core.get_filtered_skills(f"{x_tenant_id}_search")
-            return {"jsonrpc": "2.0", "id": body["id"], "result": {"content": [{"type": "text", "text": json.dumps(items, indent=2)}]}}
+        try:
+            result = await router.call(name, args, tenant_id=x_tenant_id)
+        except ToolNotFound as e:
+            return {
+                "jsonrpc": "2.0",
+                "id": body.get("id"),
+                "error": {"code": -32601, "message": str(e)},
+            }
+        return {"jsonrpc": "2.0", "id": body.get("id"), "result": result}
     return {"jsonrpc": "2.0", "id": body.get("id"), "error": {"code": -32601, "message": "Method not implemented"}}
 
 def start_server():

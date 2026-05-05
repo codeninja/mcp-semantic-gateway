@@ -8,7 +8,12 @@ from mcp_semantic_gateway.storage.vector_store import VectorStore
 from mcp_semantic_gateway.ingestion.embedder import LocalEmbedder
 
 class SearchCore:
-    def __init__(self, config: MCPSemanticGatewayConfig, base_dir: Path):
+    def __init__(
+        self,
+        config: MCPSemanticGatewayConfig,
+        base_dir: Path,
+        registry: Optional[object] = None,
+    ):
         self.config = config
         self.base_dir = base_dir
         self.embedder = LocalEmbedder(config.embedding.model_name)
@@ -16,6 +21,11 @@ class SearchCore:
         self.vector_store.load()
         self.db_path = self.base_dir / "index" / "metadata.db"
         self.contexts: Dict[str, Dict] = {} # tenant_id -> {query, expires_at}
+        # Optional ``ToolRegistry``. When provided, item names in
+        # ``tools/list`` output are rewritten to the registry's canonical form
+        # so collisions are visible to MCP clients. Untyped here to avoid an
+        # import cycle with :mod:`retrieval.registry`.
+        self.registry = registry
 
     def set_context(self, tenant_id: str, query: str, ttl: int = 300):
         self.contexts[tenant_id] = {
@@ -34,47 +44,45 @@ class SearchCore:
             fallback = self.config.proxy.fallback_on_no_context
             if fallback == FallbackBehavior.NONE:
                 return []
-            
+
             items = []
             async with aiosqlite.connect(self.db_path) as db:
-                sql = "SELECT name, description, input_schema, item_type FROM tools WHERE item_type = ?"
+                sql = "SELECT name, description, input_schema, item_type, server_id FROM tools WHERE item_type = ?"
                 async with db.execute(sql, (item_type,)) as cursor:
                     async for row in cursor:
-                        item = {
-                            "name": row[0],
-                            "description": row[1],
-                        }
-                        if item_type == "tool":
-                            item["inputSchema"] = json.loads(row[2]) if row[2] else {"type": "object"}
-                        else:
-                            # For prompts, arguments is the equivalent
-                            item["arguments"] = json.loads(row[2]) if row[2] else []
-                        items.append(item)
+                        items.append(self._row_to_item(row, item_type))
             return items
 
         # Semantic retrieval
         query_vector = self.embedder.embed([query])[0]
         # Query more to filter by type
         labels, _ = self.vector_store.knn_query(query_vector, k=min(100, self.config.retrieval.top_k * 5))
-        
+
         items = []
         async with aiosqlite.connect(self.db_path) as db:
             for label in labels:
-                async with db.execute("SELECT name, description, input_schema, item_type FROM tools LIMIT 1 OFFSET ?", (label,)) as cursor:
+                async with db.execute("SELECT name, description, input_schema, item_type, server_id FROM tools LIMIT 1 OFFSET ?", (label,)) as cursor:
                     row = await cursor.fetchone()
                     if row and row[3] == item_type:
-                        item = {
-                            "name": row[0],
-                            "description": row[1],
-                        }
-                        if item_type == "tool":
-                            item["inputSchema"] = json.loads(row[2]) if row[2] else {"type": "object"}
-                        else:
-                            item["arguments"] = json.loads(row[2]) if row[2] else []
-                        items.append(item)
+                        items.append(self._row_to_item(row, item_type))
                         if len(items) >= self.config.retrieval.top_k:
                             break
         return items
+
+    def _row_to_item(self, row, item_type: str) -> dict:
+        name, description, input_schema_json, _item_type, server_id = row
+        canonical = name
+        if self.registry is not None and item_type == "tool":
+            resolved = self.registry.canonical_for(server_id, name)
+            if resolved:
+                canonical = resolved
+        item = {"name": canonical, "description": description}
+        if item_type == "tool":
+            item["inputSchema"] = json.loads(input_schema_json) if input_schema_json else {"type": "object"}
+        else:
+            # For prompts, arguments is the equivalent
+            item["arguments"] = json.loads(input_schema_json) if input_schema_json else []
+        return item
 
     async def get_filtered_tools(self, tenant_id: str) -> List[dict]:
         return await self.get_filtered_items(tenant_id, "tool")
