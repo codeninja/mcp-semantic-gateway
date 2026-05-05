@@ -1,15 +1,15 @@
 import os
 import tomlkit
 from pathlib import Path
-from mcp_semantic_gateway.config.loader import DEFAULT_CONFIG_PATH
+from mcp_semantic_gateway.config.loader import gateway_home
 
 def initialize_data_dir():
-    base_dir = Path("~/.mcp_semantic_gateway").expanduser()
+    base_dir = gateway_home()
     (base_dir / "index").mkdir(parents=True, exist_ok=True)
     (base_dir / "models").mkdir(parents=True, exist_ok=True)
     (base_dir / "logs").mkdir(parents=True, exist_ok=True)
-    
-    config_path = DEFAULT_CONFIG_PATH
+
+    config_path = base_dir / "config.toml"
     if not config_path.exists():
         doc = tomlkit.document()
         doc.add(tomlkit.comment("MCPSemanticGateway Configuration"))

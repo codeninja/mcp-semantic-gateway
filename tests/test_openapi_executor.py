@@ -537,6 +537,25 @@ async def test_json_response_yields_structured_and_text():
 
 
 @pytest.mark.asyncio
+async def test_json_array_response_omits_structured_content():
+    """The MCP spec requires ``structuredContent`` to be an object. When
+    the upstream returns a JSON array (or scalar), the executor surfaces
+    it as text only and omits ``structuredContent`` so the MCP SDK on the
+    client side doesn't reject the result."""
+
+    cap = _Capture()
+    payload = [{"id": "1", "name": "Fido"}, {"id": "2", "name": "Whiskers"}]
+    executor = _make_executor(cap.respond(200, payload))
+    handle = _make_handle(parameters=[
+        {"name": "id", "in": "path", "required": True, "schema": {"type": "string"}},
+    ])
+    result = await executor.call(handle, {"id": "1"})
+    assert "structuredContent" not in result
+    # The full JSON must still be visible to the model in the text block.
+    assert json.loads(result["content"][0]["text"]) == payload
+
+
+@pytest.mark.asyncio
 async def test_text_response_returns_text_content():
     cap = _Capture()
     executor = _make_executor(cap.respond(200, "hello", content_type="text/plain"))

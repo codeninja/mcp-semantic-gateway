@@ -158,11 +158,17 @@ def _json_response(
 def _structured_blocks(parsed: Any, warnings: List[str]) -> ResponseMapping:
     # Pretty-printed text fallback so simple clients still see something.
     pretty = json.dumps(parsed, indent=2, ensure_ascii=False)
-    return ResponseMapping(
-        content_blocks=[{"type": "text", "text": pretty}],
-        structured_content=parsed,
-        warnings=warnings,
-    )
+    blocks = [{"type": "text", "text": pretty}]
+    # MCP requires ``structuredContent`` to be an object. JSON arrays and
+    # scalars survive in the text block; we only set ``structuredContent``
+    # when ``parsed`` is dict-shaped.
+    if isinstance(parsed, dict):
+        return ResponseMapping(
+            content_blocks=blocks,
+            structured_content=parsed,
+            warnings=warnings,
+        )
+    return ResponseMapping(content_blocks=blocks, warnings=warnings)
 
 
 def _image_response(

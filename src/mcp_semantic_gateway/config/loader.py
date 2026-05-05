@@ -12,13 +12,28 @@ base. Non-dict values (scalars, lists) are replaced wholesale.
 
 from __future__ import annotations
 
+import os
 import tomllib
 from pathlib import Path
 from typing import Iterable, Optional
 
 from mcp_semantic_gateway.config.models import MCPSemanticGatewayConfig
 
-DEFAULT_CONFIG_PATH = Path("~/.mcp_semantic_gateway/config.toml").expanduser()
+
+def gateway_home() -> Path:
+    """Resolve the gateway data directory.
+
+    Honors ``MCP_SEMANTIC_GATEWAY_HOME`` (useful for tests, examples, and
+    multi-tenant deployments); otherwise defaults to
+    ``~/.mcp_semantic_gateway``.
+    """
+
+    return Path(
+        os.environ.get("MCP_SEMANTIC_GATEWAY_HOME", "~/.mcp_semantic_gateway")
+    ).expanduser()
+
+
+DEFAULT_CONFIG_PATH = gateway_home() / "config.toml"
 
 
 def _load_toml(path: Path) -> dict:
