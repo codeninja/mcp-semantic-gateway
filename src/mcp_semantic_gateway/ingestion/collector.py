@@ -74,16 +74,31 @@ class MCPClient:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=env
+            # asyncio's default StreamReader limit is 64 KiB per line. A
+            # JSON-RPC tools/list response is a single newline-terminated
+            # line, and large catalogs (github copilot, stitch, etc.) blow
+            # past 64 KiB easily, raising LimitOverrunError. 10 MiB
+            # comfortably fits any realistic upstream response.
+            limit=10 * 1024 * 1024,
+            env=env,
         )
 
     async def stop(self):
-        if self.process:
-            try:
-                self.process.terminate()
-                await asyncio.wait_for(self.process.wait(), timeout=5.0)
-            except asyncio.TimeoutError:
-                self.process.kill()
+        if not self.process:
+            return
+        try:
+            self.process.terminate()
+            await asyncio.wait_for(self.process.wait(), timeout=5.0)
+        except asyncio.TimeoutError:
+            self.process.kill()
+            await self.process.wait()
+        # Explicitly close the underlying transport so its __del__ does not
+        # try to schedule cleanup on a closed event loop at interpreter
+        # shutdown (RuntimeError: Event loop is closed).
+        transport = getattr(self.process, "_transport", None)
+        if transport is not None:
+            transport.close()
+        self.process = None
 
     async def call_tools_list(self) -> List[dict]:
         if not self.process or not self.process.stdin or not self.process.stdout:
