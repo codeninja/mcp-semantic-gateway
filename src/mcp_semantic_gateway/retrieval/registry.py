@@ -149,6 +149,12 @@ class ToolRegistry:
         self._initialized = False
 
     async def initialize(self) -> None:
+        # Run the metadata-DB schema migration before any SELECT that
+        # references the post-#19 ``vector_id`` column. Without this,
+        # ``resolve()`` against a legacy on-disk DB raises
+        # ``OperationalError: no such column: vector_id`` from inside
+        # ``get_tool_by_id`` before SearchCore has had a chance to migrate.
+        await self.db.initialize()
         rows = await self.db.list_tool_summaries()
         # Filter to executable items. Skills and prompts are not callable as
         # ``tools/call`` targets, so they don't participate in canonical

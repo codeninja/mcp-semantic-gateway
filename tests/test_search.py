@@ -524,3 +524,78 @@ async def test_searchcore_migrates_empty_legacy_db_without_raising(tmp_path):
         cursor = await db.execute("PRAGMA table_info(tools)")
         cols = {row[1] for row in await cursor.fetchall()}
     assert "vector_id" in cols
+
+
+@pytest.mark.asyncio
+async def test_no_context_fallback_excludes_stale_rows_from_removed_servers(
+    tmp_path,
+):
+    """Bug from PR #20 review: when there is no tenant query context,
+    ``get_filtered_items`` returns *every* row matching ``item_type``,
+    including stale rows whose ``vector_id`` is NULL because their
+    upstream was removed before the latest ``index_all`` pass. Stale
+    tools must not be exposed to MCP clients via the no-context
+    ``tools/list`` path either."""
+
+    base = tmp_path
+    db_path = base / "index" / "metadata.db"
+    vec_path = base / "index" / "vectors.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    db = MetadataDB(db_path)
+    await db.initialize()
+
+    # Initial state: two tools indexed, vector_ids 0 and 1.
+    await db.save_tool(
+        ToolRecord(
+            tool_id="ghost::tool::removed",
+            server_id="ghost",
+            name="removed",
+            description="Tool from a server that was deleted from config.",
+            item_type="tool",
+            vector_id=0,
+        )
+    )
+    await db.save_tool(
+        ToolRecord(
+            tool_id="petstore::tool::listPets",
+            server_id="petstore",
+            name="listPets",
+            description="List pets in the store.",
+            item_type="tool",
+            vector_id=1,
+        )
+    )
+
+    # Re-index pass: ghost server is gone, only listPets is re-saved with
+    # a fresh label. ``clear_vector_ids`` resets every vector_id to NULL,
+    # then the surviving row gets vector_id=0 again. The stale "removed"
+    # row keeps vector_id=NULL.
+    await db.clear_vector_ids()
+    await db.save_tool(
+        ToolRecord(
+            tool_id="petstore::tool::listPets",
+            server_id="petstore",
+            name="listPets",
+            description="List pets in the store.",
+            item_type="tool",
+            vector_id=0,
+        )
+    )
+
+    vs = VectorStore(vec_path, dim=2)
+    vs.add_items([[1.0, 0.0]], [0])
+    vs.save()
+
+    cfg = MCPSemanticGatewayConfig()
+    cfg.embedding.dimensions = 2
+    core = SearchCore(cfg, base)
+    core.embedder = _stub_embedder([1.0, 0.0])
+
+    # No context set -> hits the FallbackBehavior.ALL no-context branch.
+    items = await core.get_filtered_items("tenant-without-context", "tool")
+    item_names = [i["name"] for i in items]
+    assert "listPets" in item_names
+    assert "removed" not in item_names, (
+        "Stale row with vector_id IS NULL leaked through the no-context "
+        f"fallback path: {item_names}"
+    )

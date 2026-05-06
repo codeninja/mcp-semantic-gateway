@@ -96,7 +96,15 @@ class SearchCore:
 
             items = []
             async with aiosqlite.connect(self.db_path) as db:
-                sql = "SELECT name, description, input_schema, item_type, server_id FROM tools WHERE item_type = ?"
+                # Restrict to active rows: stale rows from removed/renamed
+                # sources have ``vector_id = NULL`` after the latest
+                # ``index_writer.clear_vector_ids()`` and would otherwise
+                # leak into the no-context ``tools/list`` response.
+                sql = (
+                    "SELECT name, description, input_schema, item_type, "
+                    "server_id FROM tools "
+                    "WHERE item_type = ? AND vector_id IS NOT NULL"
+                )
                 async with db.execute(sql, (item_type,)) as cursor:
                     async for row in cursor:
                         items.append(self._row_to_item(row, item_type))
