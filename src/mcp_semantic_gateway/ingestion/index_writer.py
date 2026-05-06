@@ -21,13 +21,6 @@ async def index_all(config: MCPSemanticGatewayConfig, base_dir: Path, *, log=typ
 
     db = MetadataDB(base_dir / "index" / "metadata.db")
     await db.initialize()
-    # Neutralize any stale rows from previous runs: removed or renamed
-    # sources keep their primary key (``tool_id``) so ``INSERT OR REPLACE``
-    # will not overwrite them, but their ``vector_id`` must not collide
-    # with a fresh hnswlib label. ``SearchCore`` joins on
-    # ``WHERE vector_id = ?`` so NULL-ing them out makes them invisible to
-    # search until they are explicitly cleaned up.
-    await db.clear_vector_ids()
 
     embedder = LocalEmbedder(config.embedding.model_name)
     vector_store = VectorStore(
@@ -70,7 +63,17 @@ async def index_all(config: MCPSemanticGatewayConfig, base_dir: Path, *, log=typ
         log(f"Embedding {len(all_texts)} tools...")
         vectors = embedder.embed(all_texts)
 
+        # Only NULL the prior vector_ids once collection + embedding have
+        # succeeded — otherwise a 0-item collection or a transient embedder
+        # failure would invalidate the on-disk index without producing a
+        # replacement (vectors.db still has old labels, but every metadata
+        # row would carry ``vector_id = NULL`` so lookups never match).
+        # Note: this still doesn't make the rewrite atomic — a crash
+        # between this line and ``vector_store.save()`` below can leave a
+        # partially-rewritten metadata.db. Full atomicity (single
+        # transaction or temp-DB swap) is tracked separately.
         log("Saving index...")
+        await db.clear_vector_ids()
         for tool in all_tools:
             await db.save_tool(tool)
 
@@ -78,6 +81,8 @@ async def index_all(config: MCPSemanticGatewayConfig, base_dir: Path, *, log=typ
         vector_store.save()
         log("Done.")
     else:
+        # Don't touch ``vector_id`` when nothing was harvested — the previous
+        # successful index keeps serving searches.
         log("No tools found to index.")
     return len(all_tools)
 

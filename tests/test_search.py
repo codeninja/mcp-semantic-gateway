@@ -228,7 +228,9 @@ def test_search_cli_json_output(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_migration_old_db_without_vector_id_survives_index_pass(tmp_path):
+async def test_migration_old_db_without_vector_id_survives_index_pass(
+    tmp_path, monkeypatch
+):
     """A pre-existing metadata.db with the legacy schema (no ``vector_id``
     column) should be migrated by ``MetadataDB.initialize`` and any stale
     rows should end up with ``vector_id = NULL`` after the next index
@@ -241,7 +243,21 @@ async def test_migration_old_db_without_vector_id_survives_index_pass(tmp_path):
         ServerConfig,
         SourceType,
     )
+    from mcp_semantic_gateway.ingestion import index_writer
     from mcp_semantic_gateway.ingestion.index_writer import index_all
+
+    # Replace the production ``LocalEmbedder`` (which would download/load
+    # ``SentenceTransformer``) with a tiny deterministic stub. We exercise
+    # the SQLite migration + ``clear_vector_ids`` behaviour, not embedding
+    # quality, so a 2-D fixed vector is enough.
+    class _StubEmbedder:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def embed(self, texts):
+            return [[1.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr(index_writer, "LocalEmbedder", _StubEmbedder)
 
     base = tmp_path / "gw"
     db_path = base / "index" / "metadata.db"
@@ -287,7 +303,7 @@ async def test_migration_old_db_without_vector_id_survives_index_pass(tmp_path):
     )
 
     cfg = MCPSemanticGatewayConfig()
-    cfg.embedding.dimensions = 384  # default model dim; embedder picks model
+    cfg.embedding.dimensions = 2  # matches ``_StubEmbedder``'s output
     cfg.servers = {
         "skills": ServerConfig(type=SourceType.SKILL, path=str(skill_dir))
     }
@@ -393,3 +409,118 @@ async def test_regression_removed_server_does_not_return_stale_metadata(tmp_path
     item_names = [i["name"] for i in items]
     assert "listPets" in item_names
     assert "removed" not in item_names
+
+
+@pytest.mark.asyncio
+async def test_searchcore_migrates_legacy_db_and_raises_on_all_null(tmp_path):
+    """``SearchCore`` should auto-migrate a metadata.db that predates the
+    ``vector_id`` column instead of crashing with ``OperationalError: no
+    such column``. After migration, if every row's ``vector_id`` is NULL
+    (i.e. no ``index_all`` has populated them yet), retrieval should raise
+    a ``StaleIndexError`` with an actionable message rather than silently
+    returning empty results."""
+
+    import aiosqlite
+
+    from mcp_semantic_gateway.retrieval.core import StaleIndexError
+
+    base = tmp_path
+    db_path = base / "index" / "metadata.db"
+    vec_path = base / "index" / "vectors.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Legacy schema: no ``vector_id`` column, one stale row.
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(
+            """
+            CREATE TABLE tools (
+                tool_id TEXT PRIMARY KEY,
+                server_id TEXT,
+                name TEXT,
+                title TEXT,
+                description TEXT,
+                input_schema TEXT,
+                output_schema TEXT,
+                annotations TEXT,
+                embedding_text TEXT,
+                indexed_at TEXT,
+                index_version INTEGER,
+                item_type TEXT DEFAULT 'tool',
+                route_metadata TEXT
+            )
+            """
+        )
+        await db.execute(
+            "INSERT INTO tools (tool_id, server_id, name, item_type) "
+            "VALUES (?, ?, ?, ?)",
+            ("petstore::tool::listPets", "petstore", "listPets", "tool"),
+        )
+        await db.commit()
+
+    # The vector store needs to exist so ``SearchCore`` can load it.
+    vs = VectorStore(vec_path, dim=2)
+    vs.add_items([[1.0, 0.0]], [0])
+    vs.save()
+
+    cfg = MCPSemanticGatewayConfig()
+    cfg.embedding.dimensions = 2
+    core = SearchCore(cfg, base)
+    core.embedder = _stub_embedder([1.0, 0.0])
+
+    with pytest.raises(StaleIndexError, match="mcp-semantic-gateway index"):
+        await core.search_with_scores("list pets", top_k=1)
+
+    # Migration also mutates the on-disk schema before the post-check
+    # raises — verify the column was actually added.
+    async with aiosqlite.connect(db_path) as db:
+        cursor = await db.execute("PRAGMA table_info(tools)")
+        cols = {row[1] for row in await cursor.fetchall()}
+    assert "vector_id" in cols
+
+
+@pytest.mark.asyncio
+async def test_searchcore_migrates_empty_legacy_db_without_raising(tmp_path):
+    """When the legacy DB has no rows at all, the post-migration NULL check
+    must not fire — a brand-new install before its first ``index`` should
+    not be falsely flagged as stale."""
+
+    import aiosqlite
+
+    base = tmp_path
+    db_path = base / "index" / "metadata.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(
+            """
+            CREATE TABLE tools (
+                tool_id TEXT PRIMARY KEY,
+                server_id TEXT,
+                name TEXT,
+                title TEXT,
+                description TEXT,
+                input_schema TEXT,
+                output_schema TEXT,
+                annotations TEXT,
+                embedding_text TEXT,
+                indexed_at TEXT,
+                index_version INTEGER,
+                item_type TEXT DEFAULT 'tool',
+                route_metadata TEXT
+            )
+            """
+        )
+        await db.commit()
+
+    cfg = MCPSemanticGatewayConfig()
+    cfg.embedding.dimensions = 2
+    core = SearchCore(cfg, base)
+
+    # ``_ensure_migrated`` is the unit under test here; it must add the
+    # column and return cleanly when no rows exist.
+    await core._ensure_migrated()
+
+    async with aiosqlite.connect(db_path) as db:
+        cursor = await db.execute("PRAGMA table_info(tools)")
+        cols = {row[1] for row in await cursor.fetchall()}
+    assert "vector_id" in cols
