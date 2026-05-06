@@ -35,7 +35,7 @@ async def index_all(config: MCPSemanticGatewayConfig, base_dir: Path, *, log=typ
     all_tools = []
     all_texts = []
 
-    for t in all_harvested:
+    for i, t in enumerate(all_harvested):
         server_id = t["_server_id"]
         item_type = t["_item_type"]
         text = build_embedding_text(t["name"], t.get("title"), t.get("description"))
@@ -52,6 +52,9 @@ async def index_all(config: MCPSemanticGatewayConfig, base_dir: Path, *, log=typ
             index_version=1,
             item_type=item_type,
             route_metadata=t.get("_route_metadata"),
+            # Same int we hand to ``vector_store.add_items`` below so
+            # ``SearchCore`` can join on ``WHERE vector_id = ?``.
+            vector_id=i,
         )
         all_tools.append(record)
         all_texts.append(text)
@@ -60,7 +63,17 @@ async def index_all(config: MCPSemanticGatewayConfig, base_dir: Path, *, log=typ
         log(f"Embedding {len(all_texts)} tools...")
         vectors = embedder.embed(all_texts)
 
+        # Only NULL the prior vector_ids once collection + embedding have
+        # succeeded — otherwise a 0-item collection or a transient embedder
+        # failure would invalidate the on-disk index without producing a
+        # replacement (vectors.db still has old labels, but every metadata
+        # row would carry ``vector_id = NULL`` so lookups never match).
+        # Note: this still doesn't make the rewrite atomic — a crash
+        # between this line and ``vector_store.save()`` below can leave a
+        # partially-rewritten metadata.db. Full atomicity (single
+        # transaction or temp-DB swap) is tracked separately.
         log("Saving index...")
+        await db.clear_vector_ids()
         for tool in all_tools:
             await db.save_tool(tool)
 
@@ -68,6 +81,8 @@ async def index_all(config: MCPSemanticGatewayConfig, base_dir: Path, *, log=typ
         vector_store.save()
         log("Done.")
     else:
+        # Don't touch ``vector_id`` when nothing was harvested — the previous
+        # successful index keeps serving searches.
         log("No tools found to index.")
     return len(all_tools)
 

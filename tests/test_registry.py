@@ -328,3 +328,73 @@ async def test_registry_uninitialized_raises():
         reg = ToolRegistry(Path(d) / "m.db")
         with pytest.raises(RuntimeError):
             await reg.resolve("anything")
+
+
+@pytest.mark.asyncio
+async def test_registry_resolves_against_legacy_db_without_vector_id_column(
+    tmp_path,
+):
+    """Bug from PR #20 review: ``ToolRegistry.initialize`` doesn't run the
+    schema migration that ``MetadataDB.initialize`` performs, so a direct
+    ``tools/call`` against a legacy on-disk DB (no ``vector_id`` column)
+    raises ``sqlite3.OperationalError: no such column: vector_id`` from
+    inside ``get_tool_by_id``'s SELECT before any ``tools/list`` /
+    ``SearchCore`` call has had a chance to migrate the schema."""
+
+    import aiosqlite
+
+    db_path = tmp_path / "m.db"
+
+    # Hand-craft the pre-#19 schema: every column the registry will read
+    # except ``vector_id``. One executable tool row so ``resolve`` has
+    # something to find.
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(
+            """
+            CREATE TABLE tools (
+                tool_id TEXT PRIMARY KEY,
+                server_id TEXT,
+                name TEXT,
+                title TEXT,
+                description TEXT,
+                input_schema TEXT,
+                output_schema TEXT,
+                annotations TEXT,
+                embedding_text TEXT,
+                indexed_at TEXT,
+                index_version INTEGER,
+                item_type TEXT DEFAULT 'tool',
+                route_metadata TEXT
+            )
+            """
+        )
+        await db.execute(
+            "INSERT INTO tools (tool_id, server_id, name, item_type, "
+            "input_schema) VALUES (?, ?, ?, ?, ?)",
+            (
+                "petstore::tool::listPets",
+                "petstore",
+                "listPets",
+                "tool",
+                '{"type": "object"}',
+            ),
+        )
+        await db.commit()
+
+    reg = ToolRegistry(db_path)
+    await reg.initialize()
+
+    # ``resolve`` triggers ``MetadataDB.get_tool_by_id``, whose SELECT
+    # now includes ``vector_id``. On a legacy DB this raises
+    # OperationalError unless the registry migrates the schema first.
+    handle = await reg.resolve("listPets")
+    assert handle is not None
+    assert handle.canonical_name == "listPets"
+    assert handle.server_id == "petstore"
+
+    # Migration must have actually mutated the schema, not just swallowed
+    # the error.
+    async with aiosqlite.connect(db_path) as db:
+        cursor = await db.execute("PRAGMA table_info(tools)")
+        cols = {row[1] for row in await cursor.fetchall()}
+    assert "vector_id" in cols

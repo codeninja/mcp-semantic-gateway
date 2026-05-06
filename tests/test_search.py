@@ -42,6 +42,7 @@ async def _seed_two_tools(base: Path) -> None:
             name="listPets",
             description="List pets in the store.",
             item_type="tool",
+            vector_id=0,
         )
     )
     await db.save_tool(
@@ -51,6 +52,7 @@ async def _seed_two_tools(base: Path) -> None:
             name="getForecast",
             description="Daily weather forecast for a US zip code.",
             item_type="tool",
+            vector_id=1,
         )
     )
 
@@ -129,6 +131,7 @@ async def test_search_with_scores_filters_by_item_type():
                 name="listPets",
                 description="List pets",
                 item_type="tool",
+                vector_id=0,
             )
         )
         await db.save_tool(
@@ -138,6 +141,7 @@ async def test_search_with_scores_filters_by_item_type():
                 name="manage-pets",
                 description="Manage pets workflow",
                 item_type="skill",
+                vector_id=1,
             )
         )
         vs = VectorStore(vec_path, dim=2)
@@ -216,3 +220,382 @@ def test_search_cli_json_output(monkeypatch, tmp_path):
     assert payload[0]["name"] == "listPets"
     assert payload[0]["server_id"] == "petstore"
     assert "score" in payload[0]
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for issue #19 (vector_id column replaces LIMIT/OFFSET)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_migration_old_db_without_vector_id_survives_index_pass(
+    tmp_path, monkeypatch
+):
+    """A pre-existing metadata.db with the legacy schema (no ``vector_id``
+    column) should be migrated by ``MetadataDB.initialize`` and any stale
+    rows should end up with ``vector_id = NULL`` after the next index
+    pass — while fresh rows get a populated label."""
+
+    import aiosqlite
+
+    from mcp_semantic_gateway.config.models import (
+        MCPSemanticGatewayConfig,
+        ServerConfig,
+        SourceType,
+    )
+    from mcp_semantic_gateway.ingestion import index_writer
+    from mcp_semantic_gateway.ingestion.index_writer import index_all
+
+    # Replace the production ``LocalEmbedder`` (which would download/load
+    # ``SentenceTransformer``) with a tiny deterministic stub. We exercise
+    # the SQLite migration + ``clear_vector_ids`` behaviour, not embedding
+    # quality, so a 2-D fixed vector is enough.
+    class _StubEmbedder:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def embed(self, texts):
+            return [[1.0, 0.0] for _ in texts]
+
+    monkeypatch.setattr(index_writer, "LocalEmbedder", _StubEmbedder)
+
+    base = tmp_path / "gw"
+    db_path = base / "index" / "metadata.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Create the legacy schema by hand: no ``vector_id`` column.
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(
+            """
+            CREATE TABLE tools (
+                tool_id TEXT PRIMARY KEY,
+                server_id TEXT,
+                name TEXT,
+                title TEXT,
+                description TEXT,
+                input_schema TEXT,
+                output_schema TEXT,
+                annotations TEXT,
+                embedding_text TEXT,
+                indexed_at TEXT,
+                index_version INTEGER,
+                item_type TEXT DEFAULT 'tool',
+                route_metadata TEXT
+            )
+            """
+        )
+        # Stale row from a "previous" index_all run for a server that was
+        # since removed from config.toml.
+        await db.execute(
+            "INSERT INTO tools (tool_id, server_id, name, item_type) "
+            "VALUES (?, ?, ?, ?)",
+            ("ghost::skill::removed", "ghost", "removed", "skill"),
+        )
+        await db.commit()
+
+    # Build a one-skill source so the next index_all writes exactly one
+    # fresh row.
+    skill_dir = tmp_path / "skills"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: hello\ndescription: Greets the user.\n---\n# hello\n",
+        encoding="utf-8",
+    )
+
+    cfg = MCPSemanticGatewayConfig()
+    cfg.embedding.dimensions = 2  # matches ``_StubEmbedder``'s output
+    cfg.servers = {
+        "skills": ServerConfig(type=SourceType.SKILL, path=str(skill_dir))
+    }
+
+    n = await index_all(cfg, base, log=lambda *_: None)
+    assert n == 1
+
+    # Schema migrated: vector_id column now exists.
+    async with aiosqlite.connect(db_path) as db:
+        cursor = await db.execute("PRAGMA table_info(tools)")
+        cols = {row[1] for row in await cursor.fetchall()}
+        assert "vector_id" in cols
+
+        # Stale row was preserved but its vector_id is NULL.
+        cursor = await db.execute(
+            "SELECT vector_id FROM tools WHERE tool_id = ?",
+            ("ghost::skill::removed",),
+        )
+        row = await cursor.fetchone()
+        assert row is not None
+        assert row[0] is None
+
+        # Fresh row got a non-NULL vector_id matching the hnswlib label.
+        cursor = await db.execute(
+            "SELECT vector_id FROM tools WHERE name = ?", ("hello",)
+        )
+        row = await cursor.fetchone()
+        assert row is not None
+        assert row[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_regression_removed_server_does_not_return_stale_metadata(tmp_path):
+    """Simulate the exact failure mode from issue #19: an old metadata.db
+    with two rows from a previous index_all, then a re-index where one
+    server has been removed. The new vectors.db has a single embedding
+    labeled 0; the old code's ``LIMIT 1 OFFSET 0`` would return the
+    *first* row by insertion order (which may be the stale one) instead
+    of the surviving row."""
+
+    base = tmp_path
+    db_path = base / "index" / "metadata.db"
+    vec_path = base / "index" / "vectors.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    db = MetadataDB(db_path)
+    await db.initialize()
+
+    # Initial state: two tools indexed, vector_ids 0 and 1. The "ghost"
+    # row is inserted first so it sits at OFFSET 0 in insertion order.
+    await db.save_tool(
+        ToolRecord(
+            tool_id="ghost::tool::removed",
+            server_id="ghost",
+            name="removed",
+            description="Tool from a server that was deleted from config.",
+            item_type="tool",
+            vector_id=0,
+        )
+    )
+    await db.save_tool(
+        ToolRecord(
+            tool_id="petstore::tool::listPets",
+            server_id="petstore",
+            name="listPets",
+            description="List pets in the store.",
+            item_type="tool",
+            vector_id=1,
+        )
+    )
+
+    # Re-index pass: clear old vector_ids, save the surviving row with the
+    # fresh label 0 (matches what index_all does).
+    await db.clear_vector_ids()
+    await db.save_tool(
+        ToolRecord(
+            tool_id="petstore::tool::listPets",
+            server_id="petstore",
+            name="listPets",
+            description="List pets in the store.",
+            item_type="tool",
+            vector_id=0,
+        )
+    )
+
+    vs = VectorStore(vec_path, dim=2)
+    vs.add_items([[1.0, 0.0]], [0])
+    vs.save()
+
+    cfg = MCPSemanticGatewayConfig()
+    cfg.embedding.dimensions = 2
+    core = SearchCore(cfg, base)
+    core.embedder = _stub_embedder([1.0, 0.0])
+
+    # search_with_scores: surviving tool only.
+    matches = await core.search_with_scores("list pets", top_k=5)
+    names = [m["name"] for m in matches]
+    assert "listPets" in names
+    assert "removed" not in names
+
+    # get_filtered_items: same expectation.
+    core.set_context("t1", "list pets")
+    items = await core.get_filtered_items("t1", "tool")
+    item_names = [i["name"] for i in items]
+    assert "listPets" in item_names
+    assert "removed" not in item_names
+
+
+@pytest.mark.asyncio
+async def test_searchcore_migrates_legacy_db_and_raises_on_all_null(tmp_path):
+    """``SearchCore`` should auto-migrate a metadata.db that predates the
+    ``vector_id`` column instead of crashing with ``OperationalError: no
+    such column``. After migration, if every row's ``vector_id`` is NULL
+    (i.e. no ``index_all`` has populated them yet), retrieval should raise
+    a ``StaleIndexError`` with an actionable message rather than silently
+    returning empty results."""
+
+    import aiosqlite
+
+    from mcp_semantic_gateway.retrieval.core import StaleIndexError
+
+    base = tmp_path
+    db_path = base / "index" / "metadata.db"
+    vec_path = base / "index" / "vectors.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Legacy schema: no ``vector_id`` column, one stale row.
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(
+            """
+            CREATE TABLE tools (
+                tool_id TEXT PRIMARY KEY,
+                server_id TEXT,
+                name TEXT,
+                title TEXT,
+                description TEXT,
+                input_schema TEXT,
+                output_schema TEXT,
+                annotations TEXT,
+                embedding_text TEXT,
+                indexed_at TEXT,
+                index_version INTEGER,
+                item_type TEXT DEFAULT 'tool',
+                route_metadata TEXT
+            )
+            """
+        )
+        await db.execute(
+            "INSERT INTO tools (tool_id, server_id, name, item_type) "
+            "VALUES (?, ?, ?, ?)",
+            ("petstore::tool::listPets", "petstore", "listPets", "tool"),
+        )
+        await db.commit()
+
+    # The vector store needs to exist so ``SearchCore`` can load it.
+    vs = VectorStore(vec_path, dim=2)
+    vs.add_items([[1.0, 0.0]], [0])
+    vs.save()
+
+    cfg = MCPSemanticGatewayConfig()
+    cfg.embedding.dimensions = 2
+    core = SearchCore(cfg, base)
+    core.embedder = _stub_embedder([1.0, 0.0])
+
+    with pytest.raises(StaleIndexError, match="mcp-semantic-gateway index"):
+        await core.search_with_scores("list pets", top_k=1)
+
+    # Migration also mutates the on-disk schema before the post-check
+    # raises — verify the column was actually added.
+    async with aiosqlite.connect(db_path) as db:
+        cursor = await db.execute("PRAGMA table_info(tools)")
+        cols = {row[1] for row in await cursor.fetchall()}
+    assert "vector_id" in cols
+
+
+@pytest.mark.asyncio
+async def test_searchcore_migrates_empty_legacy_db_without_raising(tmp_path):
+    """When the legacy DB has no rows at all, the post-migration NULL check
+    must not fire — a brand-new install before its first ``index`` should
+    not be falsely flagged as stale."""
+
+    import aiosqlite
+
+    base = tmp_path
+    db_path = base / "index" / "metadata.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(
+            """
+            CREATE TABLE tools (
+                tool_id TEXT PRIMARY KEY,
+                server_id TEXT,
+                name TEXT,
+                title TEXT,
+                description TEXT,
+                input_schema TEXT,
+                output_schema TEXT,
+                annotations TEXT,
+                embedding_text TEXT,
+                indexed_at TEXT,
+                index_version INTEGER,
+                item_type TEXT DEFAULT 'tool',
+                route_metadata TEXT
+            )
+            """
+        )
+        await db.commit()
+
+    cfg = MCPSemanticGatewayConfig()
+    cfg.embedding.dimensions = 2
+    core = SearchCore(cfg, base)
+
+    # ``_ensure_migrated`` is the unit under test here; it must add the
+    # column and return cleanly when no rows exist.
+    await core._ensure_migrated()
+
+    async with aiosqlite.connect(db_path) as db:
+        cursor = await db.execute("PRAGMA table_info(tools)")
+        cols = {row[1] for row in await cursor.fetchall()}
+    assert "vector_id" in cols
+
+
+@pytest.mark.asyncio
+async def test_no_context_fallback_excludes_stale_rows_from_removed_servers(
+    tmp_path,
+):
+    """Bug from PR #20 review: when there is no tenant query context,
+    ``get_filtered_items`` returns *every* row matching ``item_type``,
+    including stale rows whose ``vector_id`` is NULL because their
+    upstream was removed before the latest ``index_all`` pass. Stale
+    tools must not be exposed to MCP clients via the no-context
+    ``tools/list`` path either."""
+
+    base = tmp_path
+    db_path = base / "index" / "metadata.db"
+    vec_path = base / "index" / "vectors.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    db = MetadataDB(db_path)
+    await db.initialize()
+
+    # Initial state: two tools indexed, vector_ids 0 and 1.
+    await db.save_tool(
+        ToolRecord(
+            tool_id="ghost::tool::removed",
+            server_id="ghost",
+            name="removed",
+            description="Tool from a server that was deleted from config.",
+            item_type="tool",
+            vector_id=0,
+        )
+    )
+    await db.save_tool(
+        ToolRecord(
+            tool_id="petstore::tool::listPets",
+            server_id="petstore",
+            name="listPets",
+            description="List pets in the store.",
+            item_type="tool",
+            vector_id=1,
+        )
+    )
+
+    # Re-index pass: ghost server is gone, only listPets is re-saved with
+    # a fresh label. ``clear_vector_ids`` resets every vector_id to NULL,
+    # then the surviving row gets vector_id=0 again. The stale "removed"
+    # row keeps vector_id=NULL.
+    await db.clear_vector_ids()
+    await db.save_tool(
+        ToolRecord(
+            tool_id="petstore::tool::listPets",
+            server_id="petstore",
+            name="listPets",
+            description="List pets in the store.",
+            item_type="tool",
+            vector_id=0,
+        )
+    )
+
+    vs = VectorStore(vec_path, dim=2)
+    vs.add_items([[1.0, 0.0]], [0])
+    vs.save()
+
+    cfg = MCPSemanticGatewayConfig()
+    cfg.embedding.dimensions = 2
+    core = SearchCore(cfg, base)
+    core.embedder = _stub_embedder([1.0, 0.0])
+
+    # No context set -> hits the FallbackBehavior.ALL no-context branch.
+    items = await core.get_filtered_items("tenant-without-context", "tool")
+    item_names = [i["name"] for i in items]
+    assert "listPets" in item_names
+    assert "removed" not in item_names, (
+        "Stale row with vector_id IS NULL leaked through the no-context "
+        f"fallback path: {item_names}"
+    )
