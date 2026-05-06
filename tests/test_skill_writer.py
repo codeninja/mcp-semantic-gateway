@@ -315,13 +315,17 @@ def test_write_diagnostic(tmp_path: Path):
     ]
     diag_path = write_diagnostic(pkg, project_root=tmp_path, reasons=reasons)
 
+    # The diagnostic lives INSIDE the would-be skill folder so it is
+    # co-located with any later successful v1/ generation rather than
+    # leaving an orphan *.diagnostic.json at the parent level.
     expected = (
         tmp_path
         / ".mcp_semantic_gateway"
         / "skills"
         / pkg.server_id
         / "ab12cd34ef56"
-        / "bad-skill.diagnostic.json"
+        / "bad-skill"
+        / "diagnostic.json"
     )
     assert diag_path == expected
     assert diag_path.is_file()
@@ -329,8 +333,9 @@ def test_write_diagnostic(tmp_path: Path):
     assert payload["status"] == "rejected"
     assert payload["skill_id"] == "bad-skill"
     assert payload["reasons"] == reasons
-    # Diagnostic landing should not interfere with a future successful skill.
-    assert not (diag_path.parent / "bad-skill").exists()
+    # No legacy-location orphan at the parent level.
+    parent = diag_path.parent.parent
+    assert not (parent / "bad-skill.diagnostic.json").exists()
 
 
 def test_diagnostic_atomic(tmp_path: Path):

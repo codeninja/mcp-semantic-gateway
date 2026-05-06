@@ -402,6 +402,108 @@ def _check_skill_paths(report: DoctorReport, config: MCPSemanticGatewayConfig) -
                 )
 
 
+def _orphan_diagnostic_files(skill_roots: List[Path]) -> List[Path]:
+    """Return legacy-location diagnostic files: ``<root>/<server>/<hash>/*.diagnostic.json``.
+
+    The new layout puts diagnostics inside the would-be skill folder
+    (``<server>/<hash>/<skill-id>/diagnostic.json``); this scan picks up
+    only the old parent-level orphans.
+    """
+
+    found: List[Path] = []
+    seen: set[Path] = set()
+    for root in skill_roots:
+        try:
+            resolved = root.resolve()
+        except OSError:
+            continue
+        if resolved in seen or not resolved.is_dir():
+            seen.add(resolved)
+            continue
+        seen.add(resolved)
+        # Pattern: <skills-root>/<server>/<hash>/<skill-id>.diagnostic.json
+        for p in resolved.glob("*/*/*.diagnostic.json"):
+            if p.is_file():
+                found.append(p)
+    return found
+
+
+def _check_orphan_diagnostics(
+    report: DoctorReport,
+    config: MCPSemanticGatewayConfig,
+    *,
+    fix: bool,
+) -> None:
+    """Stage 5b: legacy-location ``*.diagnostic.json`` files at the parent
+    of the skill folder. The current writer puts them inside the skill
+    folder; older synth runs left orphans behind.
+    """
+
+    skill_roots: List[Path] = []
+    cwd = Path.cwd()
+    output_root = cwd / config.skill_generation.output_dir / "skills"
+    skill_roots.append(output_root)
+    for sc in config.servers.values():
+        if sc.type == SourceType.SKILL and sc.enabled and sc.path:
+            skill_roots.append(Path(sc.path).expanduser())
+
+    orphans = _orphan_diagnostic_files(skill_roots)
+    if not orphans:
+        report.add(
+            name="orphan-diagnostics",
+            status="pass",
+            detail="No legacy-location *.diagnostic.json files found.",
+        )
+        return
+
+    if not fix:
+        report.add(
+            name="orphan-diagnostics",
+            status="warn",
+            detail=(
+                f"{len(orphans)} legacy *.diagnostic.json file(s) at the "
+                "parent of skill folders. The current synth writer places "
+                "diagnostics inside <skill-id>/diagnostic.json."
+            ),
+            remediation=(
+                "Re-run with `mcp-semantic-gateway doctor --fix` to delete "
+                "them. The next `synth` run will recreate diagnostics in "
+                "the new layout."
+            ),
+        )
+        return
+
+    removed = 0
+    failed: List[Path] = []
+    for p in orphans:
+        try:
+            p.unlink()
+            removed += 1
+        except OSError:
+            failed.append(p)
+
+    if failed:
+        report.add(
+            name="orphan-diagnostics",
+            status="fail",
+            detail=(
+                f"Removed {removed}/{len(orphans)} orphan diagnostic(s); "
+                f"{len(failed)} could not be removed."
+            ),
+            remediation=(
+                "Check permissions on: "
+                + ", ".join(str(p) for p in failed[:3])
+                + ("..." if len(failed) > 3 else "")
+            ),
+        )
+    else:
+        report.add(
+            name="orphan-diagnostics",
+            status="pass",
+            detail=f"Removed {removed} legacy-location *.diagnostic.json file(s).",
+        )
+
+
 def _check_route_metadata(
     report: DoctorReport, config: MCPSemanticGatewayConfig
 ) -> None:
@@ -513,7 +615,7 @@ def _render_table(console: Console, report: DoctorReport) -> None:
     console.print(table)
 
 
-async def _run(skip_network: bool, as_json: bool) -> int:
+async def _run(skip_network: bool, as_json: bool, fix: bool) -> int:
     report = DoctorReport()
     config = _check_config_loadable(report)
     if config is not None:
@@ -521,6 +623,7 @@ async def _run(skip_network: bool, as_json: bool) -> int:
         _check_auth_env_vars(report, config)
         await _check_openapi_reachable(report, config, skip_network)
         _check_skill_paths(report, config)
+        _check_orphan_diagnostics(report, config, fix=fix)
         _check_route_metadata(report, config)
 
     if as_json:
@@ -552,6 +655,14 @@ def doctor_command(
     as_json: bool = typer.Option(
         False, "--json", help="Emit machine-readable JSON instead of a table."
     ),
+    fix: bool = typer.Option(
+        False,
+        "--fix",
+        help=(
+            "Apply non-destructive cleanups (currently: remove "
+            "legacy-location *.diagnostic.json orphan files)."
+        ),
+    ),
 ) -> None:
     """Validate gateway configuration and runtime state.
 
@@ -560,7 +671,7 @@ def doctor_command(
     early with actionable remediation.
     """
 
-    failures = asyncio.run(_run(skip_network, as_json))
+    failures = asyncio.run(_run(skip_network, as_json, fix))
     if failures:
         # Exit code carries the failure count so CI / scripts can act on it.
         # POSIX exit codes are 8-bit unsigned; clamp at 255 in case of an

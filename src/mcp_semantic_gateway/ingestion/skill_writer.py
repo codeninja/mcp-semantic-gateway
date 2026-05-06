@@ -295,17 +295,21 @@ def write_diagnostic(
     output_dir: str = ".mcp_semantic_gateway",
     reasons: list[dict],
 ) -> Path:
-    """Write a ``<skill-id>.diagnostic.json`` for a rejected package.
+    """Write a ``diagnostic.json`` for a rejected package.
 
-    The diagnostic lives as a sibling of the (would-be) ``<skill-id>/``
-    directory — i.e. under
-    ``<output_dir>/skills/<server_id>/<source_hash[:12]>/<skill-id>.diagnostic.json``
-    — so a failed skill does not pollute a ``<skill-id>/`` slot that a
-    later successful generation might want to occupy.
+    The diagnostic lives *inside* the (would-be) ``<skill-id>/`` directory:
+    ``<output_dir>/skills/<server_id>/<source_hash[:12]>/<skill-id>/diagnostic.json``.
+
+    This co-locates failed-synthesis diagnostics with the skill folder
+    they describe instead of leaving orphan ``*.diagnostic.json`` files at
+    the parent level. A subsequent successful generation writes
+    ``<skill-id>/v1/SKILL.md`` next to the diagnostic, preserving the
+    history of what was rejected before the cluster succeeded.
     """
     server_root = _server_root(project_root, output_dir, package.server_id, package.source_hash)
-    server_root.mkdir(parents=True, exist_ok=True)
-    target = server_root / f"{package.skill_id}.diagnostic.json"
+    skill_dir = server_root / package.skill_id
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    target = skill_dir / "diagnostic.json"
 
     payload = {
         "schema_version": 1,

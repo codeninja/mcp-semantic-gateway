@@ -435,3 +435,87 @@ def test_doctor_cli_json_output_carries_results(monkeypatch, tmp_path):
     assert "failures" in payload
     names = [r["name"] for r in payload["results"]]
     assert "config-file" in names
+
+
+# ---------------------------------------------------------------------------
+# orphan-diagnostics check
+# ---------------------------------------------------------------------------
+
+
+def _seed_orphan_diagnostic(skills_root: Path, server: str, hash_short: str, skill_id: str) -> Path:
+    target_dir = skills_root / server / hash_short
+    target_dir.mkdir(parents=True, exist_ok=True)
+    f = target_dir / f"{skill_id}.diagnostic.json"
+    f.write_text('{"status":"rejected"}', encoding="utf-8")
+    return f
+
+
+def test_orphan_diagnostics_warns_when_present_and_no_fix(monkeypatch, tmp_path):
+    """No --fix: warn with remediation hint, file untouched."""
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MCP_SEMANTIC_GATEWAY_HOME", str(tmp_path))
+    _write_config(tmp_path, "[servers]\n")
+
+    skills_root = tmp_path / ".mcp_semantic_gateway" / "skills"
+    orphan = _seed_orphan_diagnostic(skills_root, "github", "205eec12a36e", "bad-skill")
+
+    config = load_config(tmp_path / "config.toml")
+    report = doctor_module.DoctorReport()
+    doctor_module._check_orphan_diagnostics(report, config, fix=False)
+
+    res = _result_for(report, "orphan-diagnostics")
+    assert res is not None
+    assert res.status == "warn"
+    assert "1 legacy" in res.detail
+    assert res.remediation and "--fix" in res.remediation
+    assert orphan.is_file(), "warn-only must not delete files"
+
+
+def test_orphan_diagnostics_removes_files_with_fix(monkeypatch, tmp_path):
+    """--fix: delete every legacy-location *.diagnostic.json under the
+    synth output and any type=skill source path. New-layout diagnostics
+    living inside <skill-id>/diagnostic.json must NOT be matched."""
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MCP_SEMANTIC_GATEWAY_HOME", str(tmp_path))
+
+    extra_skill_root = tmp_path / "external-skills"
+    _write_config(
+        tmp_path,
+        f'[servers.lib]\ntype = "skill"\npath = "{extra_skill_root}"\n',
+    )
+
+    synth_root = tmp_path / ".mcp_semantic_gateway" / "skills"
+    o1 = _seed_orphan_diagnostic(synth_root, "github", "205eec12a36e", "skill-a")
+    o2 = _seed_orphan_diagnostic(synth_root, "stitch", "abc123def456", "skill-b")
+    o3 = _seed_orphan_diagnostic(extra_skill_root, "lib", "111111111111", "skill-c")
+
+    new_loc = synth_root / "github" / "205eec12a36e" / "skill-d" / "diagnostic.json"
+    new_loc.parent.mkdir(parents=True, exist_ok=True)
+    new_loc.write_text('{"status":"rejected"}', encoding="utf-8")
+
+    config = load_config(tmp_path / "config.toml")
+    report = doctor_module.DoctorReport()
+    doctor_module._check_orphan_diagnostics(report, config, fix=True)
+
+    res = _result_for(report, "orphan-diagnostics")
+    assert res is not None
+    assert res.status == "pass", res.detail
+    assert "Removed 3" in res.detail
+    assert not o1.exists()
+    assert not o2.exists()
+    assert not o3.exists()
+    assert new_loc.is_file(), "new-layout diagnostic must not be removed"
+
+
+def test_orphan_diagnostics_pass_when_clean(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MCP_SEMANTIC_GATEWAY_HOME", str(tmp_path))
+    _write_config(tmp_path, "[servers]\n")
+    config = load_config(tmp_path / "config.toml")
+    report = doctor_module.DoctorReport()
+    doctor_module._check_orphan_diagnostics(report, config, fix=False)
+    res = _result_for(report, "orphan-diagnostics")
+    assert res is not None and res.status == "pass"
+
